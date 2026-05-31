@@ -206,6 +206,18 @@ tempCodeRunnerFile.py
 # Ruff stuff:
 .ruff_cache/
 
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Backend venv
+backend/.venv/
+
+# Env files (use .env.example as template)
+*.env
+!.env.example
+
 # PyPI configuration file
 .pypirc
 
