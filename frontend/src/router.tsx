@@ -4,6 +4,7 @@ import {
   createRouter,
   Outlet,
   redirect,
+  useParams,
 } from "@tanstack/react-router";
 import { queryClient } from "@/lib/queryClient";
 import { authApi, ApiError } from "@/lib/api";
@@ -15,6 +16,7 @@ import { LogDetailPage } from "@/routes/log-detail";
 import { ConversationPage } from "@/routes/conversation";
 import { ApiKeysPage } from "@/routes/api-keys";
 import { DocsPage } from "@/routes/docs";
+import { SettingsPage } from "@/routes/settings";
 
 // ─── Auth guard ─────────────────────────────────────────────────────────────
 
@@ -68,8 +70,8 @@ const logDetailRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/logs/$logId",
   beforeLoad: requireAuth,
-  component: ({ useParams }) => {
-    const { logId } = useParams();
+  component: function LogDetailRoute() {
+    const { logId } = useParams({ from: "/logs/$logId" });
     return <LogDetailPage logId={logId} />;
   },
 });
@@ -78,8 +80,8 @@ const conversationRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/conversations/$conversationId",
   beforeLoad: requireAuth,
-  component: ({ useParams }) => {
-    const { conversationId } = useParams();
+  component: function ConversationRoute() {
+    const { conversationId } = useParams({ from: "/conversations/$conversationId" });
     return <ConversationPage conversationId={conversationId} />;
   },
 });
@@ -99,6 +101,13 @@ const docsRoute = createRoute({
   component: DocsPage,
 });
 
+const settingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/settings",
+  beforeLoad: requireAuth,
+  component: SettingsPage,
+});
+
 // ─── Router ─────────────────────────────────────────────────────────────────
 
 const routeTree = rootRoute.addChildren([
@@ -110,6 +119,7 @@ const routeTree = rootRoute.addChildren([
   conversationRoute,
   apiKeysRoute,
   docsRoute,
+  settingsRoute,
 ]);
 
 export const router = createRouter({ routeTree });

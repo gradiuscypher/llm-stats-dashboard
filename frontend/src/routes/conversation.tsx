@@ -1,6 +1,7 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { logsApi } from "@/lib/api";
+import { logsApi, LogEntryDetail } from "@/lib/api";
 import { Layout } from "@/components/Layout";
 import { PageHeader } from "@/components/PageHeader";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -17,10 +18,7 @@ export function ConversationPage({ conversationId }: ConversationPageProps) {
 
   return (
     <Layout>
-      <PageHeader
-        title="Conversation"
-        subtitle={conversationId}
-      />
+      <PageHeader title="Conversation" subtitle={conversationId} />
 
       {isLoading ? (
         <p className="text-sm text-[var(--color-text-muted)]">Loading...</p>
@@ -32,76 +30,105 @@ export function ConversationPage({ conversationId }: ConversationPageProps) {
             {data?.total_cost != null && <span>${data.total_cost.toFixed(6)}</span>}
           </div>
 
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-2">
             {(data?.entries ?? []).map((entry, idx) => (
-              <div
-                key={entry.id}
-                className="border border-[var(--color-border)] bg-[var(--color-surface)] p-4"
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-[var(--color-text-muted)]">
-                      #{idx + 1}
-                    </span>
-                    <span className="text-xs">{entry.model}</span>
-                    <StatusBadge status={entry.status} />
-                  </div>
-                  <Link
-                    to="/logs/$logId"
-                    params={{ logId: entry.id }}
-                    className="text-xs text-[var(--color-accent)]"
-                  >
-                    Detail →
-                  </Link>
-                </div>
-
-                {/* Last user message preview */}
-                {(() => {
-                  const msgs = (entry.request as { messages?: { role: string; content: string }[] }).messages ?? [];
-                  const lastUser = [...msgs].reverse().find((m) => m.role === "user");
-                  const content = typeof lastUser?.content === "string"
-                    ? lastUser.content
-                    : JSON.stringify(lastUser?.content);
-                  return lastUser ? (
-                    <div className="mb-2">
-                      <p className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-muted)] mb-1">
-                        User
-                      </p>
-                      <p className="text-sm text-[var(--color-text)] line-clamp-3">
-                        {content?.slice(0, 300)}{(content?.length ?? 0) > 300 ? "…" : ""}
-                      </p>
-                    </div>
-                  ) : null;
-                })()}
-
-                {/* Assistant response preview */}
-                {(() => {
-                  const msg = (entry.response as { message?: { role: string; content: string } }).message;
-                  const content = typeof msg?.content === "string"
-                    ? msg.content
-                    : JSON.stringify(msg?.content);
-                  return msg ? (
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-muted)] mb-1">
-                        Assistant
-                      </p>
-                      <p className="text-sm text-[var(--color-text-muted)] line-clamp-2">
-                        {content?.slice(0, 300)}{(content?.length ?? 0) > 300 ? "…" : ""}
-                      </p>
-                    </div>
-                  ) : null;
-                })()}
-
-                <div className="flex gap-3 mt-3 text-xs text-[var(--color-text-faint)]">
-                  <span>{entry.total_tokens.toLocaleString()} tokens</span>
-                  {entry.latency_ms != null && <span>{entry.latency_ms}ms</span>}
-                  {entry.cost_total != null && <span>${entry.cost_total.toFixed(6)}</span>}
-                </div>
-              </div>
+              <LogEntryFold key={entry.id} entry={entry} idx={idx} />
             ))}
           </div>
         </>
       )}
     </Layout>
+  );
+}
+
+// ─── Collapsible log entry ────────────────────────────────────────────────────
+
+function LogEntryFold({ entry, idx }: { entry: LogEntryDetail; idx: number }) {
+  const [open, setOpen] = useState(false);
+
+  const msgs = (entry.request as { messages?: { role: string; content: string }[] }).messages ?? [];
+  const lastUser = [...msgs].reverse().find((m) => m.role === "user");
+  const userText = lastUser
+    ? typeof lastUser.content === "string" ? lastUser.content : JSON.stringify(lastUser.content)
+    : null;
+
+  const assistantMsg = (entry.response as { message?: { role: string; content: string } }).message;
+  const assistantText = assistantMsg
+    ? typeof assistantMsg.content === "string" ? assistantMsg.content : JSON.stringify(assistantMsg.content)
+    : null;
+
+  return (
+    <div className="border border-[var(--color-border)] bg-[var(--color-surface)]">
+      {/* ── Fold header (always visible) ── */}
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-3 px-4 py-2.5 text-left cursor-pointer bg-transparent border-none hover:bg-[var(--color-bg-alt)] transition-colors"
+        aria-expanded={open}
+      >
+        {/* Chevron */}
+        <span
+          className="text-[var(--color-text-faint)] text-xs select-none transition-transform"
+          style={{ display: "inline-block", transform: open ? "rotate(90deg)" : "rotate(0deg)" }}
+        >
+          ▶
+        </span>
+
+        {/* Index */}
+        <span className="text-xs font-bold text-[var(--color-text-muted)] tabular-nums w-6 shrink-0">
+          #{idx + 1}
+        </span>
+
+        {/* Model + status */}
+        <span className="text-xs font-bold shrink-0">{entry.model}</span>
+        <StatusBadge status={entry.status} />
+
+        {/* User message snippet */}
+        {userText && (
+          <span className="text-xs text-[var(--color-text-muted)] truncate flex-1 min-w-0">
+            {userText.slice(0, 120)}{userText.length > 120 ? "…" : ""}
+          </span>
+        )}
+
+        {/* Right-side meta */}
+        <span className="text-xs text-[var(--color-text-faint)] tabular-nums shrink-0 ml-auto pl-4">
+          {entry.total_tokens.toLocaleString()} tok
+          {entry.latency_ms != null && ` · ${entry.latency_ms}ms`}
+          {entry.cost_total != null && ` · $${entry.cost_total.toFixed(6)}`}
+        </span>
+      </button>
+
+      {/* ── Expanded body ── */}
+      {open && (
+        <div className="border-t border-[var(--color-border)]">
+          {/* User message */}
+          {userText && (
+            <div className="px-4 py-3 border-b border-[var(--color-border)] bg-[var(--color-surface)]">
+              <p className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-muted)] mb-1">User</p>
+              <p className="text-sm whitespace-pre-wrap leading-relaxed">{userText}</p>
+            </div>
+          )}
+
+          {/* Assistant response */}
+          {assistantText && (
+            <div className="px-4 py-3 border-b border-[var(--color-border)] bg-[var(--color-bg)]">
+              <p className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-muted)] mb-1">Assistant</p>
+              <p className="text-sm whitespace-pre-wrap leading-relaxed text-[var(--color-text-muted)]">{assistantText}</p>
+            </div>
+          )}
+
+          {/* Footer: all messages count + detail link */}
+          <div className="px-4 py-2 flex items-center justify-between text-xs text-[var(--color-text-faint)]">
+            <span>{msgs.length} message{msgs.length !== 1 ? "s" : ""} in request</span>
+            <Link
+              to="/logs/$logId"
+              params={{ logId: entry.id }}
+              className="text-[var(--color-accent)] no-underline hover:underline"
+            >
+              Full detail →
+            </Link>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
