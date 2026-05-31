@@ -1,0 +1,19 @@
+"""Database engine and session management."""
+
+from collections.abc import Generator
+
+from sqlmodel import Session, SQLModel, create_engine
+
+from app.config import settings
+
+engine = create_engine(settings.database_url, echo=settings.app_env == "development")
+
+
+def init_db() -> None:
+    """Create all tables (used for testing; production uses Alembic)."""
+    SQLModel.metadata.create_all(engine)
+
+
+def get_session() -> Generator[Session, None, None]:
+    with Session(engine) as session:
+        yield session
