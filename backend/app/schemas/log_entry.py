@@ -139,6 +139,59 @@ class ConversationResponse(BaseModel):
     total_cost: float | None
 
 
+# ---------------------------------------------------------------------------
+# Transcript schemas (Phase 2 — contiguous conversation view)
+# ---------------------------------------------------------------------------
+
+class TranscriptMessage(BaseModel):
+    """A single message in the deduped transcript, with call attribution."""
+    message_id: uuid.UUID
+    role: str
+    content: Any  # str | list[MessagePart] | dict
+    # Which call introduced this message (None for messages shared with parent)
+    introduced_by_entry_id: uuid.UUID | None = None
+    # 1-based index of the call that introduced this message
+    introduced_by_call_index: int | None = None
+
+
+class CallDivider(BaseModel):
+    """Metadata marker injected between messages at a call boundary."""
+    entry_id: uuid.UUID
+    call_index: int          # 1-based position in this conversation branch
+    model: str
+    provider: str
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    cost_total: float | None
+    latency_ms: int | None
+    status: str
+    created_at: datetime
+
+
+class TranscriptBranch(BaseModel):
+    """A linear sequence of messages sharing a common prefix with the trunk."""
+    branch_id: uuid.UUID      # entry_id of the first call that diverges
+    messages: list[TranscriptMessage]
+    dividers: list[CallDivider]
+
+
+class TranscriptResponse(BaseModel):
+    """Full conversation transcript — linear or branching.
+
+    For linear conversations: trunk contains all messages, branches is empty.
+    For branching conversations: trunk contains shared prefix messages;
+    branches contains each diverging path from the fork point.
+    """
+    conversation_id: str
+    trunk: list[TranscriptMessage]
+    branches: list[TranscriptBranch]
+    dividers: list[CallDivider]   # call markers along the trunk
+    total_tokens: int
+    total_cost: float | None
+    is_branched: bool
+
+
 class DailyStats(BaseModel):
     date: str
     calls: int

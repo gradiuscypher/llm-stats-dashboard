@@ -89,7 +89,7 @@ def clean_tables_fixture(pg_engine) -> None:
     with pg_engine.connect() as conn:
         conn.execute(
             text(
-                "TRUNCATE TABLE user_sessions, api_keys, log_entries, users, model_prices "
+                "TRUNCATE TABLE user_sessions, api_keys, log_entries, messages, users, model_prices "
                 "RESTART IDENTITY CASCADE"
             )
         )
