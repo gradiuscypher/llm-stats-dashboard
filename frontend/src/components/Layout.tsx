@@ -14,6 +14,7 @@ const NAV_LINKS = [
   { to: "/logs", label: "Logs" },
   { to: "/api-keys", label: "API Keys" },
   { to: "/docs", label: "Docs" },
+  { to: "/settings", label: "Settings" },
 ];
 
 export function Layout({ children }: LayoutProps) {

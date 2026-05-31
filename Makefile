@@ -105,7 +105,7 @@ dev-backend: ## Run FastAPI backend with hot reload
 
 .PHONY: dev-frontend
 dev-frontend: ## Run Vite frontend dev server
-	cd $(FRONTEND_DIR) && pnpm dev
+	cd $(FRONTEND_DIR) && pnpm dev --host 0.0.0.0
 
 # ─── Testing ──────────────────────────────────────────────────────────────────
 

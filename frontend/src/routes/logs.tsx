@@ -23,6 +23,164 @@ function fmtDate(iso: string) {
   });
 }
 
+// ─── Grouping ────────────────────────────────────────────────────────────────
+
+type StandaloneRow = { kind: "standalone"; log: LogEntryPublic };
+type GroupRow      = { kind: "group";      conversationId: string; entries: LogEntryPublic[] };
+type DisplayRow    = StandaloneRow | GroupRow;
+
+function groupLogs(logs: LogEntryPublic[]): DisplayRow[] {
+  // Preserve original order; gather runs/groups by conversation_id
+  const seen = new Map<string, GroupRow>();
+  const result: DisplayRow[] = [];
+
+  for (const log of logs) {
+    if (!log.conversation_id) {
+      result.push({ kind: "standalone", log });
+      continue;
+    }
+
+    const existing = seen.get(log.conversation_id);
+    if (existing) {
+      existing.entries.push(log);
+    } else {
+      const group: GroupRow = { kind: "group", conversationId: log.conversation_id, entries: [log] };
+      seen.set(log.conversation_id, group);
+      result.push(group);
+    }
+  }
+
+  return result;
+}
+
+// ─── Standalone row ───────────────────────────────────────────────────────────
+
+function StandaloneLogRow({ log }: { log: LogEntryPublic }) {
+  return (
+    <tr className="hover:bg-[var(--color-bg-alt)]">
+      <td className="tabular-nums whitespace-nowrap">
+        <Link
+          to="/logs/$logId"
+          params={{ logId: log.id }}
+          className="no-underline hover:underline"
+        >
+          {fmtDate(log.created_at)}
+        </Link>
+      </td>
+      <td>
+        <span className="text-xs">{log.model}</span>
+        <span className="ml-1 text-[var(--color-text-faint)] text-xs">{log.provider}</span>
+      </td>
+      <td><span className="faint text-xs">—</span></td>
+      <td className="tabular-nums">{log.total_tokens.toLocaleString()}</td>
+      <td className="tabular-nums">{fmtCost(log.cost_total)}</td>
+      <td className="tabular-nums">{log.latency_ms != null ? `${log.latency_ms}ms` : "—"}</td>
+      <td><StatusBadge status={log.status} /></td>
+    </tr>
+  );
+}
+
+// ─── Group rows ───────────────────────────────────────────────────────────────
+
+function ConversationGroupRows({ group }: { group: GroupRow }) {
+  const [open, setOpen] = useState(false);
+
+  const first = group.entries[0];
+  const totalTokens   = group.entries.reduce((s, e) => s + e.total_tokens, 0);
+  const totalCost     = group.entries.reduce<number | null>((s, e) =>
+    e.cost_total != null ? (s ?? 0) + e.cost_total : s, null);
+  const lastTs        = group.entries[group.entries.length - 1].created_at;
+  const hasError      = group.entries.some((e) => e.status === "error");
+
+  return (
+    <>
+      {/* ── Group header row ── */}
+      <tr
+        className="hover:bg-[var(--color-bg-alt)] cursor-pointer select-none"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        {/* Timestamp: first call timestamp */}
+        <td className="tabular-nums whitespace-nowrap">
+          <span className="inline-flex items-center gap-1.5">
+            <span
+              className="text-[var(--color-text-faint)] text-xs"
+              style={{ display: "inline-block", transform: open ? "rotate(90deg)" : "rotate(0deg)", transition: "transform 120ms" }}
+            >
+              ▶
+            </span>
+            {fmtDate(first.created_at)}
+            {open && (
+              <span className="text-[var(--color-text-faint)] text-xs">
+                → {fmtDate(lastTs)}
+              </span>
+            )}
+          </span>
+        </td>
+
+        {/* Model: show first model; if mixed, note it */}
+        <td>
+          <span className="text-xs">{first.model}</span>
+          <span className="ml-1 text-[var(--color-text-faint)] text-xs">{first.provider}</span>
+        </td>
+
+        {/* Conversation ID */}
+        <td>
+          <Link
+            to="/conversations/$conversationId"
+            params={{ conversationId: group.conversationId }}
+            className="text-xs no-underline hover:underline"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {group.conversationId}
+          </Link>
+          <span className="ml-1.5 text-[var(--color-text-faint)] text-xs">
+            ({group.entries.length})
+          </span>
+        </td>
+
+        {/* Totals */}
+        <td className="tabular-nums">{totalTokens.toLocaleString()}</td>
+        <td className="tabular-nums">{fmtCost(totalCost)}</td>
+        <td className="tabular-nums text-[var(--color-text-faint)]">—</td>
+        <td>
+          {hasError
+            ? <StatusBadge status="error" />
+            : <StatusBadge status="success" />}
+        </td>
+      </tr>
+
+      {/* ── Expanded child rows ── */}
+      {open && group.entries.map((log) => (
+        <tr key={log.id} className="bg-[var(--color-bg-alt)] hover:bg-[var(--color-bg)]">
+          {/* Indent timestamp */}
+          <td className="tabular-nums whitespace-nowrap pl-8 text-[var(--color-text-muted)]">
+            <Link
+              to="/logs/$logId"
+              params={{ logId: log.id }}
+              className="no-underline hover:underline"
+            >
+              {fmtDate(log.created_at)}
+            </Link>
+          </td>
+          <td>
+            <span className="text-xs">{log.model}</span>
+            <span className="ml-1 text-[var(--color-text-faint)] text-xs">{log.provider}</span>
+          </td>
+          {/* No conversation cell for children — they're already grouped */}
+          <td className="text-[var(--color-text-faint)] text-xs pl-3">└</td>
+          <td className="tabular-nums">{log.total_tokens.toLocaleString()}</td>
+          <td className="tabular-nums">{fmtCost(log.cost_total)}</td>
+          <td className="tabular-nums">{log.latency_ms != null ? `${log.latency_ms}ms` : "—"}</td>
+          <td><StatusBadge status={log.status} /></td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
 export function LogsPage() {
   const [model, setModel] = useState("");
   const [provider, setProvider] = useState("");
@@ -41,6 +199,8 @@ export function LogsPage() {
         offset,
       }),
   });
+
+  const rows = groupLogs(logs);
 
   return (
     <Layout>
@@ -89,46 +249,13 @@ export function LogsPage() {
                 </tr>
               </thead>
               <tbody>
-                {logs.map((log: LogEntryPublic) => (
-                  <tr key={log.id} className="hover:bg-[var(--color-bg-alt)]">
-                    <td className="tabular-nums whitespace-nowrap">
-                      <Link
-                        to="/logs/$logId"
-                        params={{ logId: log.id }}
-                        className="no-underline hover:underline"
-                      >
-                        {fmtDate(log.created_at)}
-                      </Link>
-                    </td>
-                    <td>
-                      <span className="text-xs">{log.model}</span>
-                      <span className="ml-1 text-[var(--color-text-faint)] text-xs">
-                        {log.provider}
-                      </span>
-                    </td>
-                    <td>
-                      {log.conversation_id ? (
-                        <Link
-                          to="/conversations/$conversationId"
-                          params={{ conversationId: log.conversation_id }}
-                          className="text-xs no-underline hover:underline"
-                        >
-                          {log.conversation_id}
-                        </Link>
-                      ) : (
-                        <span className="faint text-xs">—</span>
-                      )}
-                    </td>
-                    <td className="tabular-nums">{log.total_tokens.toLocaleString()}</td>
-                    <td className="tabular-nums">{fmtCost(log.cost_total)}</td>
-                    <td className="tabular-nums">
-                      {log.latency_ms != null ? `${log.latency_ms}ms` : "—"}
-                    </td>
-                    <td>
-                      <StatusBadge status={log.status} />
-                    </td>
-                  </tr>
-                ))}
+                {rows.map((row) =>
+                  row.kind === "standalone" ? (
+                    <StandaloneLogRow key={row.log.id} log={row.log} />
+                  ) : (
+                    <ConversationGroupRows key={row.conversationId} group={row} />
+                  )
+                )}
                 {logs.length === 0 && (
                   <tr>
                     <td colSpan={7} className="text-center text-[var(--color-text-faint)] py-6">
