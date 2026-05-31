@@ -6,6 +6,15 @@
     <meta name="description" content="LLM Stats Dashboard — track LLM usage, token counts, and costs" />
     <title>LLM Stats Dashboard</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- Apply saved theme before first paint to prevent flash -->
+    <script>
+      (function(){
+        try{
+          var p=localStorage.getItem('lsd-theme');
+          if(p==='light'||p==='dark')document.documentElement.setAttribute('data-theme',p);
+        }catch(e){}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
