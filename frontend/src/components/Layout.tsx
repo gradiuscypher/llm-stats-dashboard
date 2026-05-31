@@ -3,6 +3,7 @@ import { Link, useRouter } from "@tanstack/react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { authApi } from "@/lib/api";
 import { queryClient } from "@/lib/queryClient";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 interface LayoutProps {
   children: ReactNode;
@@ -47,6 +48,7 @@ export function Layout({ children }: LayoutProps) {
             ))}
           </nav>
           <div className="flex items-center gap-3 text-xs text-[var(--color-text-muted)]">
+            <ThemeToggle />
             {user ? (
               <>
                 <span>{user.username}</span>
