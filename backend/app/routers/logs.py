@@ -11,21 +11,35 @@ from app.db import get_session
 from app.models.log_entry import LogEntry
 from app.models.user import User
 from app.schemas.log_entry import (
+    CallDivider,
     ConversationResponse,
     LogEntryCreate,
     LogEntryDetail,
     LogEntryPublic,
     StatsResponse,
+    TranscriptBranch,
+    TranscriptMessage,
+    TranscriptResponse,
 )
 from app.security.api_key_auth import get_current_user_from_api_key, require_scope
 from app.security.sessions import get_current_user
 from app.services.ingest import ingest_log_entry
+from app.services.messages import batch_rehydrate_messages, rehydrate_messages
 from app.services.stats import get_stats
 
 router = APIRouter(tags=["logs"])
 
 
-def _to_detail(e: LogEntry) -> LogEntryDetail:
+def _to_detail(e: LogEntry, messages: list[dict] | None = None) -> LogEntryDetail:
+    """Serialize a LogEntry to LogEntryDetail, rehydrating messages if provided.
+
+    Pass pre-fetched *messages* (already in order) to avoid per-entry DB queries.
+    If *messages* is None the messages field will be absent from request; callers
+    that need the full request blob should use _to_detail_with_db instead.
+    """
+    request = dict(e.request)  # shallow copy of params blob
+    if messages is not None:
+        request["messages"] = messages
     return LogEntryDetail(
         id=e.id,
         user_id=e.user_id,
@@ -42,12 +56,18 @@ def _to_detail(e: LogEntry) -> LogEntryDetail:
         status=e.status,
         client_timestamp=e.client_timestamp,
         created_at=e.created_at,
-        request=e.request,
+        request=request,
         response=e.response,
         tool_calls=e.tool_calls,
         error=e.error,
         metadata_extra=e.metadata_extra,
     )
+
+
+def _to_detail_with_db(e: LogEntry, db: Session) -> LogEntryDetail:
+    """Single-entry detail fetch — rehydrates messages in one query."""
+    messages = rehydrate_messages(e.message_ids, db)
+    return _to_detail(e, messages)
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +166,7 @@ async def get_log(
     entry = db.get(LogEntry, log_id)
     if not entry or entry.user_id != user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Log entry not found")
-    return _to_detail(entry)
+    return _to_detail_with_db(entry, db)
 
 
 @router.get("/conversations/{conversation_id}", response_model=ConversationResponse)
@@ -173,11 +193,190 @@ async def get_conversation(
     costs = [e.cost_total for e in entries if e.cost_total is not None]
     total_cost = round(sum(costs), 8) if costs else None
 
+    # Batch-fetch all messages needed across all entries in one query.
+    id_to_content = batch_rehydrate_messages([e.message_ids for e in entries], db)
+    rehydrated_entries = [
+        _to_detail(e, [id_to_content[mid] for mid in e.message_ids if mid in id_to_content])
+        for e in entries
+    ]
+
     return ConversationResponse(
         conversation_id=conversation_id,
-        entries=[_to_detail(e) for e in entries],
+        entries=rehydrated_entries,
         total_tokens=total_tokens,
         total_cost=total_cost,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Transcript — deduped contiguous conversation view
+# ---------------------------------------------------------------------------
+
+@router.get("/conversations/{conversation_id}/transcript", response_model=TranscriptResponse)
+async def get_transcript(
+    conversation_id: str,
+    request: Request,
+    db: Session = Depends(get_session),
+) -> TranscriptResponse:
+    """
+    Return a deduplicated, ordered transcript of the conversation.
+
+    For linear conversations: a single contiguous message thread.
+    For branching conversations (retries, edits): a shared trunk with per-branch
+    divergence paths.  The frontend renders the trunk as a continuous scroll
+    and shows a branch switcher at fork points.
+
+    Each unique message appears exactly once.  Per-call metadata is returned
+    as `dividers` (trunk) / branch dividers so the UI can annotate boundaries
+    (model, tokens, cost, latency) without breaking the reading flow.
+    """
+    user = await _resolve_user(request, db)
+    entries = db.exec(
+        select(LogEntry)
+        .where(LogEntry.user_id == user.id, LogEntry.conversation_id == conversation_id)
+        .order_by(LogEntry.created_at)  # type: ignore[arg-type]
+    ).all()
+
+    if not entries:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+
+    # Batch-fetch all messages.
+    id_to_content = batch_rehydrate_messages([e.message_ids for e in entries], db)
+
+    # Build call dividers (1-indexed, chronological across entire conversation).
+    all_dividers: list[CallDivider] = [
+        CallDivider(
+            entry_id=e.id,
+            call_index=idx + 1,
+            model=e.model,
+            provider=e.provider,
+            prompt_tokens=e.prompt_tokens,
+            completion_tokens=e.completion_tokens,
+            total_tokens=e.total_tokens,
+            cost_total=e.cost_total,
+            latency_ms=e.latency_ms,
+            status=e.status,
+            created_at=e.created_at,
+        )
+        for idx, e in enumerate(entries)
+    ]
+    divider_map = {d.entry_id: d for d in all_dividers}
+
+    # Detect branching: if any entry's parent_entry_id forms a non-linear tree,
+    # we have branches.  Build a set of "branch root" entry ids.
+    entry_ids = {e.id for e in entries}
+    children: dict[uuid.UUID | None, list[LogEntry]] = {}
+    for e in entries:
+        children.setdefault(e.parent_entry_id, []).append(e)
+
+    # The trunk is the chain of entries starting from the root with no siblings
+    # (or the longest chain when branching exists).
+    def _longest_chain(start_id: uuid.UUID | None) -> list[LogEntry]:
+        chain: list[LogEntry] = []
+        current_id = start_id
+        while current_id is not None or (not chain and current_id is None):
+            kids = children.get(current_id, [])
+            if not kids:
+                break
+            # Follow the branch with the most descendants (greedy longest-path).
+            best = max(kids, key=lambda e: len(e.message_ids))
+            chain.append(best)
+            current_id = best.id
+        return chain
+
+    trunk_entries = _longest_chain(None)
+    trunk_entry_ids = {e.id for e in trunk_entries}
+
+    is_branched = any(
+        len(children.get(e.id, [])) > 1 for e in entries
+    )
+
+    # Build trunk messages — unique messages in first-seen order.
+    seen_ids: set[uuid.UUID] = set()
+    trunk_messages: list[TranscriptMessage] = []
+    trunk_dividers: list[CallDivider] = []
+
+    for entry in trunk_entries:
+        new_ids = [mid for mid in entry.message_ids if mid not in seen_ids]
+        if new_ids:
+            trunk_dividers.append(divider_map[entry.id])
+        for mid in new_ids:
+            seen_ids.add(mid)
+            content = id_to_content.get(mid, {})
+            trunk_messages.append(
+                TranscriptMessage(
+                    message_id=mid,
+                    role=content.get("role", ""),
+                    content=content.get("content", ""),
+                    introduced_by_entry_id=entry.id,
+                    introduced_by_call_index=divider_map[entry.id].call_index,
+                )
+            )
+
+    # Build branches — entries not on the trunk.
+    branch_entries = [e for e in entries if e.id not in trunk_entry_ids]
+    built_branches: list[TranscriptBranch] = []
+
+    # Group branch entries by their divergence root (first entry off-trunk).
+    branch_roots: list[LogEntry] = [
+        e for e in branch_entries
+        if e.parent_entry_id is None or e.parent_entry_id in trunk_entry_ids
+    ]
+
+    for root in branch_roots:
+        # Walk this branch chain.
+        branch_chain = [root]
+        cur = root.id
+        while True:
+            kids = children.get(cur, [])
+            off_trunk = [k for k in kids if k.id not in trunk_entry_ids]
+            if not off_trunk:
+                break
+            nxt = max(off_trunk, key=lambda e: len(e.message_ids))
+            branch_chain.append(nxt)
+            cur = nxt.id
+
+        branch_seen: set[uuid.UUID] = set(seen_ids)  # start from trunk context
+        branch_messages: list[TranscriptMessage] = []
+        branch_dividers: list[CallDivider] = []
+
+        for entry in branch_chain:
+            new_ids = [mid for mid in entry.message_ids if mid not in branch_seen]
+            if new_ids:
+                branch_dividers.append(divider_map[entry.id])
+            for mid in new_ids:
+                branch_seen.add(mid)
+                content = id_to_content.get(mid, {})
+                branch_messages.append(
+                    TranscriptMessage(
+                        message_id=mid,
+                        role=content.get("role", ""),
+                        content=content.get("content", ""),
+                        introduced_by_entry_id=entry.id,
+                        introduced_by_call_index=divider_map[entry.id].call_index,
+                    )
+                )
+
+        built_branches.append(
+            TranscriptBranch(
+                branch_id=root.id,
+                messages=branch_messages,
+                dividers=branch_dividers,
+            )
+        )
+
+    total_tokens = sum(e.total_tokens for e in entries)
+    costs = [e.cost_total for e in entries if e.cost_total is not None]
+    total_cost = round(sum(costs), 8) if costs else None
+
+    return TranscriptResponse(
+        conversation_id=conversation_id,
+        trunk=trunk_messages,
+        branches=built_branches,
+        dividers=trunk_dividers,
+        total_tokens=total_tokens,
+        total_cost=total_cost,
+        is_branched=is_branched,
     )
 
 

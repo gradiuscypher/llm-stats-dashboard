@@ -4,7 +4,8 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Index
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy import UUID as SA_UUID
 from sqlmodel import Column, Field, SQLModel
 
 
@@ -23,11 +24,25 @@ class LogEntry(SQLModel, table=True):
     # Conversation grouping (client-supplied)
     conversation_id: str | None = Field(default=None, index=True, max_length=256)
 
+    # Ordered list of interned message UUIDs for the request (deduped across calls).
+    # Stored as a Postgres ARRAY so order is native; add GIN index later if reverse
+    # lookup ("which entries reference message X") becomes needed.
+    message_ids: list[uuid.UUID] = Field(
+        default_factory=list,
+        sa_column=Column(ARRAY(SA_UUID(as_uuid=True)), nullable=False, server_default="{}"),
+    )
+
+    # The log entry whose message_ids is the longest prefix of this entry's message_ids.
+    # None for the first call in a conversation or when the parent can't be determined.
+    # Used to reconstruct the conversation tree (branching / retry detection).
+    parent_entry_id: uuid.UUID | None = Field(default=None, foreign_key="log_entries.id", index=True)
+
     # Provider / model
     provider: str = Field(max_length=64)
     model: str = Field(max_length=128)
 
-    # Canonical request/response blobs (JSONB)
+    # request stores params + extras but NOT messages (those live in the messages table).
+    # response and tool_calls are per-call unique so they stay inline.
     request: dict = Field(default_factory=dict, sa_column=Column(JSONB, nullable=False))
     response: dict = Field(default_factory=dict, sa_column=Column(JSONB, nullable=False))
     tool_calls: list = Field(default_factory=list, sa_column=Column(JSONB, nullable=False))
