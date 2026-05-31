@@ -3,6 +3,10 @@
 > **Hand this document to an AI assistant to have it generate a complete
 > LLM Stats Dashboard client.** This page is self-contained and covers
 > everything needed to build a working client from scratch.
+>
+> **No authentication is required to fetch this documentation.**
+> All `/api/v1/docs-md/*` endpoints are publicly accessible — you only need
+> an API key once you start sending log entries.
 
 ---
 
