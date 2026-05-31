@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { docsApi, DocIndex } from "@/lib/api";
 import { Layout } from "@/components/Layout";
 import { PageHeader } from "@/components/PageHeader";
@@ -21,7 +22,20 @@ export function DocsPage() {
 
   return (
     <Layout>
-      <PageHeader title="Documentation" subtitle="AI-first Markdown docs" />
+      <PageHeader
+        title="Documentation"
+        subtitle="AI-first Markdown docs — publicly accessible, no login required"
+      />
+
+      {/* Raw API note for coding agents */}
+      <div className="mb-4 text-xs text-[var(--color-text-muted)] border border-[var(--color-border)] px-3 py-2 bg-[var(--color-bg-alt)]">
+        <span className="font-bold text-[var(--color-text)]">Coding agent?</span>{" "}
+        Fetch docs directly:{" "}
+        <code className="bg-[var(--color-code-bg)] px-1">GET /api/v1/docs-md</code>{" "}for the index,{" "}
+        <code className="bg-[var(--color-code-bg)] px-1">GET /api/v1/docs-md/&#123;path&#125;</code>{" "}for raw Markdown.{" "}
+        Start with{" "}
+        <code className="bg-[var(--color-code-bg)] px-1">GET /api/v1/docs-md/ai-client-guide.md</code>.
+      </div>
 
       <div className="flex gap-6">
         {/* Sidebar */}
@@ -51,7 +65,7 @@ export function DocsPage() {
             <p className="text-sm muted">Loading...</p>
           ) : (
             <div className="prose-custom">
-              <ReactMarkdown>{content ?? ""}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{content ?? ""}</ReactMarkdown>
             </div>
           )}
         </article>

@@ -94,7 +94,8 @@ const apiKeysRoute = createRoute({
 const docsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/docs",
-  beforeLoad: requireAuth,
+  // No auth guard — docs are publicly accessible so a coding agent
+  // can reach them with only a base URL (no login required).
   component: DocsPage,
 });
 

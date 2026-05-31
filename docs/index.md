@@ -28,6 +28,27 @@ available doc page. All pages are served as raw Markdown by the API at
 
 ---
 
+## Documentation endpoints (no auth required)
+
+The docs endpoints are **publicly accessible** — no login or API key needed.
+A coding agent can fetch the full documentation set before even registering:
+
+```bash
+# List all doc pages
+curl http://localhost:8000/api/v1/docs-md
+
+# Fetch a specific page (raw Markdown)
+curl http://localhost:8000/api/v1/docs-md/ai-client-guide.md
+curl http://localhost:8000/api/v1/docs-md/schemas.md
+curl http://localhost:8000/api/v1/docs-md/endpoints/logs.md
+```
+
+**Recommended starting point for a coding agent**: fetch `ai-client-guide.md` — it is
+self-contained and covers everything needed to register, create an API key, and start
+sending log entries.
+
+---
+
 ## Base URL
 
 All API endpoints are under `/api/v1`. The base URL for a local dev server is:

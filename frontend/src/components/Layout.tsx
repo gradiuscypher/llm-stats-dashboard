@@ -47,13 +47,24 @@ export function Layout({ children }: LayoutProps) {
             ))}
           </nav>
           <div className="flex items-center gap-3 text-xs text-[var(--color-text-muted)]">
-            {user && <span>{user.username}</span>}
-            <button
-              onClick={() => logoutMutation.mutate()}
-              className="font-bold uppercase tracking-wider hover:text-[var(--color-danger)] cursor-pointer bg-transparent border-none"
-            >
-              Logout
-            </button>
+            {user ? (
+              <>
+                <span>{user.username}</span>
+                <button
+                  onClick={() => logoutMutation.mutate()}
+                  className="font-bold uppercase tracking-wider hover:text-[var(--color-danger)] cursor-pointer bg-transparent border-none"
+                >
+                  Logout
+                </button>
+              </>
+            ) : (
+              <Link
+                to="/login"
+                className="font-bold uppercase tracking-wider no-underline hover:text-[var(--color-accent)]"
+              >
+                Sign in
+              </Link>
+            )}
           </div>
         </div>
       </header>
