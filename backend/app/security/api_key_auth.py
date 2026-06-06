@@ -3,8 +3,7 @@
 from collections.abc import Callable
 from datetime import datetime
 
-from fastapi import Depends, HTTPException, Security, status
-from fastapi.security import APIKeyHeader
+from fastapi import Depends, HTTPException, Request, status
 from sqlmodel import Session, select
 
 from app.db import get_session
@@ -12,7 +11,20 @@ from app.models.api_key import ApiKey
 from app.models.user import User
 from app.security.passwords import verify_password
 
-_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+def _extract_api_key(request: Request) -> str | None:
+    """Extract API key from either X-API-Key header or Authorization: Bearer."""
+    # X-API-Key header (existing clients)
+    raw_key = request.headers.get("x-api-key")
+    if raw_key:
+        return raw_key
+
+    # Authorization: Bearer header (OpenAI/OpenRouter SDKs)
+    auth = request.headers.get("authorization")
+    if auth and auth.lower().startswith("bearer "):
+        return auth[7:]  # strip "Bearer " prefix
+
+    return None
 
 
 def _parse_key(raw: str) -> tuple[str, str] | None:
@@ -30,10 +42,14 @@ def _parse_key(raw: str) -> tuple[str, str] | None:
 
 
 async def get_current_user_from_api_key(
-    raw_key: str | None = Security(_api_key_header),
+    request: Request,
     db: Session = Depends(get_session),
 ) -> tuple[User, ApiKey]:
-    """Resolve an API key header to (User, ApiKey). Raises 401 if invalid."""
+    """Resolve an API key header to (User, ApiKey). Raises 401 if invalid.
+
+    Accepts either X-API-Key header or Authorization: Bearer header.
+    """
+    raw_key = _extract_api_key(request)
     if not raw_key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

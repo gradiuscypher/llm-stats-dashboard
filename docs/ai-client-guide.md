@@ -7,13 +7,27 @@
 > **No authentication is required to fetch this documentation.**
 > All `/api/v1/docs-md/*` endpoints are publicly accessible — you only need
 > an API key once you start sending log entries.
+>
+> **New:** The dashboard now includes an [LLM Proxy](proxy.md) that
+> automatically logs every call — no client code changes needed.
+> If you're using OpenRouter, prefer the proxy over manual ingest.
 
 ---
 
 ## Overview
 
 The LLM Stats Dashboard API receives one log entry per LLM call and stores
-it for debugging and cost analysis. Your job as a client is:
+it for debugging and cost analysis. There are **two ways** to integrate:
+
+### Option A: LLM Proxy (zero-code, recommended for OpenRouter users)
+
+Point your existing OpenRouter client at `http://localhost:8000/api/v1`
+and use an API key with `proxy:use` scope.  Calls are logged automatically.
+See [LLM Proxy](proxy.md) for setup.
+
+### Option B: Push API (this guide)
+
+Intercept each LLM API call yourself and POST to `/api/v1/logs`.
 
 1. Intercept each LLM API call your application makes
 2. Map the request + response to the canonical schema (defined below)

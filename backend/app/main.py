@@ -9,7 +9,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.responses import Response as StarletteResponse
 
 from app.config import settings
-from app.routers import api_keys, auth, docs_router, health, logs, users
+from app.routers import api_keys, auth, docs_router, health, logs, proxy, users
 
 # ---------------------------------------------------------------------------
 # Rate limiter
@@ -92,6 +92,8 @@ def create_app() -> FastAPI:
     app.include_router(api_keys.router, prefix=prefix)
     app.include_router(logs.router, prefix=prefix)
     app.include_router(docs_router.router, prefix=prefix)
+    # Proxy router is registered last — its paths don't collide with existing routes
+    app.include_router(proxy.router, prefix=prefix)
 
     return app
 

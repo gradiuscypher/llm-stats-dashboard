@@ -5,7 +5,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, field_validator
 
-VALID_SCOPES = {"logs:write", "logs:read"}
+VALID_SCOPES = {"logs:write", "logs:read", "proxy:use"}
 
 
 class ApiKeyCreate(BaseModel):
