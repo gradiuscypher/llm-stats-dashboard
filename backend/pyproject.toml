@@ -15,8 +15,8 @@ dependencies = [
     "slowapi>=0.1.9",           # rate limiting
     "python-multipart>=0.0.20", # form bodies
     "uvicorn[standard]>=0.34",
-    "httpx>=0.28",              # for TestClient
-    "httpx2>=2.2.0",
+    "httpx>=0.28",              # proxy upstream client (async + streaming) + TestClient
+    "respx>=0.22",               # mock httpx for proxy tests
 ]
 
 [project.optional-dependencies]
@@ -26,6 +26,7 @@ dev = [
     "pytest-cov>=6.0",
     "ruff>=0.11",
     "ty>=0.0.1a9",
+    "respx>=0.22",
 ]
 
 [build-system]

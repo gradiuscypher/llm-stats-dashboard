@@ -20,6 +20,15 @@ class Settings(BaseSettings):
     allowed_origins: list[str] = ["http://localhost:5173"]
     max_log_body_bytes: int = 1024 * 1024  # 1 MB
 
+    # OpenRouter proxy
+    openrouter_api_key: str = ""
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_referer: str = ""
+    openrouter_app_title: str = "LLM Stats Dashboard"
+    proxy_plugins: str = "logging"  # ordered, comma-separated plugin names
+    proxy_upstream_timeout_s: int = 120
+    proxy_stream_idle_timeout_s: int = 120
+
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"
