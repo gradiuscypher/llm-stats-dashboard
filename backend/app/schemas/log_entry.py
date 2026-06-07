@@ -21,8 +21,10 @@ ContentType = str | list[MessagePart] | list[dict[str, Any]]
 
 
 class CanonicalMessage(BaseModel):
-    role: Literal["system", "user", "assistant", "tool"]
+    role: str = "user"
     content: ContentType
+    reasoning: str | None = None
+    reasoning_details: list[dict[str, Any]] | None = None
     model_config = {"extra": "allow"}
 
 
@@ -50,6 +52,7 @@ class UsagePayload(BaseModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    reasoning_tokens: int = 0
 
 
 class CostPayload(BaseModel):
@@ -107,11 +110,14 @@ class LogEntryPublic(BaseModel):
     id: uuid.UUID
     user_id: uuid.UUID
     conversation_id: str | None
+    api_key_id: uuid.UUID | None = None
+    api_key_name: str | None = None
     provider: str
     model: str
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
+    reasoning_tokens: int = 0
     cost_total: float | None
     cost_currency: str
     cost_source: str
@@ -139,6 +145,28 @@ class ConversationResponse(BaseModel):
     total_cost: float | None
 
 
+class ConversationSummary(BaseModel):
+    """One row in the conversations list — aggregate over all calls in a conversation."""
+
+    conversation_id: str
+    call_count: int
+    total_tokens: int
+    total_cost: float | None
+    # Distinct models/providers seen in this conversation (sorted, deduped)
+    models: list[str]
+    providers: list[str]
+    # Whether any call in the conversation errored
+    has_error: bool
+    first_activity: datetime
+    last_activity: datetime
+
+
+class ConversationListResponse(BaseModel):
+    conversations: list[ConversationSummary]
+    # Total distinct conversations matching the filters (for pagination UI)
+    total: int
+
+
 # ---------------------------------------------------------------------------
 # Transcript schemas (Phase 2 — contiguous conversation view)
 # ---------------------------------------------------------------------------
@@ -148,6 +176,8 @@ class TranscriptMessage(BaseModel):
     message_id: uuid.UUID
     role: str
     content: Any  # str | list[MessagePart] | dict
+    reasoning: str | None = None
+    reasoning_details: list[Any] | None = None
     # Which call introduced this message (None for messages shared with parent)
     introduced_by_entry_id: uuid.UUID | None = None
     # 1-based index of the call that introduced this message
@@ -163,6 +193,7 @@ class CallDivider(BaseModel):
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
+    reasoning_tokens: int = 0
     cost_total: float | None
     latency_ms: int | None
     status: str
@@ -196,6 +227,7 @@ class DailyStats(BaseModel):
     date: str
     calls: int
     total_tokens: int
+    reasoning_tokens: int = 0
     cost: float | None
 
 
@@ -203,12 +235,14 @@ class ModelStats(BaseModel):
     model: str
     calls: int
     total_tokens: int
+    reasoning_tokens: int = 0
     cost: float | None
 
 
 class StatsResponse(BaseModel):
     total_calls: int
     total_tokens: int
+    total_reasoning_tokens: int = 0
     total_cost: float | None
     by_day: list[DailyStats]
     by_model: list[ModelStats]

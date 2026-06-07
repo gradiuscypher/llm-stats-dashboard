@@ -14,12 +14,10 @@ import hashlib
 import json
 import uuid
 
-from sqlalchemy import text
 from sqlmodel import Session, select
 
 from app.models.log_entry import LogEntry
 from app.models.message import Message
-
 
 # ---------------------------------------------------------------------------
 # Hashing
@@ -166,23 +164,31 @@ def resolve_parent_entry_id(
     Algorithm: fetch all entries in the same conversation ordered by
     message count descending, return the first whose ids appear as a prefix
     in *message_ids*.  Works correctly for both linear appends and branching.
+
+    Safety: if the candidate's message_ids shares no common prefix at all
+    with the new entry (not even the first message), it is skipped to prevent
+    unrelated messages from being rendered as spurious branches.  When
+    multiple candidates tie on prefix length, the most recently created wins.
     """
     if not conversation_id or len(message_ids) < 2:
         return None
 
     # Fetch candidate entries (same conversation, different entry, already committed)
     candidates = db.exec(
-        select(LogEntry).where(
+        select(LogEntry)
+        .where(
             LogEntry.user_id == user_id,
             LogEntry.conversation_id == conversation_id,
             LogEntry.id != current_entry_id,
         )
+        .order_by(LogEntry.created_at.desc())  # most recent first for tie-breaking
     ).all()
 
     if not candidates:
         return None
 
     # Sort by descending prefix length for greedy match.
+    # created_at.desc() in the query ensures recency wins ties.
     candidates.sort(key=lambda e: len(e.message_ids), reverse=True)
 
     for candidate in candidates:
@@ -191,6 +197,11 @@ def resolve_parent_entry_id(
             continue
         if len(prefix) >= len(message_ids):
             continue  # can't be a *proper* prefix
+        # Safety: skip candidates that don't share at least the first message.
+        # If a candidate's initial message doesn't match, the two entries
+        # are structurally unrelated and should not be linked.
+        if prefix[0] != message_ids[0]:
+            continue
         if message_ids[: len(prefix)] == prefix:
             return candidate.id
 

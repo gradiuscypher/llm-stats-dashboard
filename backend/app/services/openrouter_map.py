@@ -4,9 +4,15 @@ Translates OpenRouter request/response shapes into the existing canonical
 LogEntryCreate schema so the dashboard read path works with zero changes.
 """
 
-import hashlib
+import json as _json
 import time
+import uuid as _uuid
+from typing import TYPE_CHECKING
 
+from pydantic import ValidationError
+from sqlmodel import Session, select
+
+from app.models.log_entry import LogEntry
 from app.schemas.log_entry import (
     CanonicalMessage,
     LogEntryCreate,
@@ -15,21 +21,47 @@ from app.schemas.log_entry import (
     UsagePayload,
 )
 
+if TYPE_CHECKING:
+    from app.proxy.context import ProxyContext
+
+
+def _to_canonical_message(msg: dict, default_role: str = "user") -> CanonicalMessage:
+    """Construct a CanonicalMessage from a raw message dict.
+
+    Normal messages are stored with their structured content intact.
+    If the message cannot be validated (e.g. an unrecognized content shape),
+    the entire dict is serialized to a plaintext JSON string so that we
+    never lose logging data.
+    """
+    role = msg.get("role", default_role)
+    content = msg.get("content", "")
+    if content is None:
+        content = ""
+    reasoning = msg.get("reasoning")
+    reasoning_details = msg.get("reasoning_details")
+    try:
+        return CanonicalMessage(
+            role=role,
+            content=content,
+            reasoning=reasoning,
+            reasoning_details=reasoning_details,
+        )
+    except ValidationError:
+        # Fall back: store the whole message as plaintext, no processing.
+        return CanonicalMessage(
+            role=str(role),
+            content=_json.dumps(msg, ensure_ascii=False, default=str),
+        )
+
 
 def _extract_message_from_choice(choice: dict) -> CanonicalMessage:
     """Extract a CanonicalMessage from an OpenRouter choice's message field."""
     msg = choice.get("message", {})
-    role = msg.get("role", "assistant")
-    content = msg.get("content", "")
-    # CanonicalMessage requires content to be a string or list, not None
-    if content is None:
-        content = ""
-    return CanonicalMessage(role=role, content=content)
+    return _to_canonical_message(msg, default_role="assistant")
 
 
 def _extract_tool_calls(choice: dict) -> list[dict]:
     """Extract tool calls from an OpenRouter choice's message."""
-    import json as _jsonlib
     msg = choice.get("message", {})
     tool_calls = msg.get("tool_calls", [])
     result: list[dict] = []
@@ -39,8 +71,8 @@ def _extract_tool_calls(choice: dict) -> list[dict]:
         # OpenRouter sends arguments as a JSON string; canonical schema expects a dict
         if isinstance(raw_args, str):
             try:
-                args = _jsonlib.loads(raw_args)
-            except _jsonlib.JSONDecodeError:
+                args = _json.loads(raw_args)
+            except _json.JSONDecodeError:
                 args = {}
         else:
             args = raw_args if isinstance(raw_args, dict) else {}
@@ -56,13 +88,23 @@ def derive_conversation_id(
     request_body: dict,
     api_key_prefix: str,
     explicit: str | None = None,
+    *,
+    message_ids: list[_uuid.UUID] | None = None,
+    user_id: _uuid.UUID | None = None,
+    db: Session | None = None,
 ) -> str:
     """Derive a stable conversation_id from the request.
 
     Resolution order:
       1. Explicit X-Conversation-Id header (passed as explicit)
       2. OpenRouter user field / metadata
-      3. Hash of leading system + first user message, salted per api_key
+      3. Prefix-ancestor inheritance (when DB is available):
+         find an existing entry whose message_ids is a proper prefix
+         of the new request's message_ids. This chains new turns to the
+         same conversation structurally, matching how stateless chat APIs
+         work (clients resend full history with each turn).
+      4. Mint a fresh UUID-based id — guarantees unrelated sessions with
+         coincidentally similar opening messages never merge.
 
     Returns a stable string id.
     """
@@ -75,35 +117,56 @@ def derive_conversation_id(
     if isinstance(user_field, str) and user_field.strip():
         return f"or-user-{user_field}"
 
-    # 3. Derived hash
-    messages = request_body.get("messages", [])
-    # Take system message(s) + first user message as hash input
-    hash_parts: list[str] = []
-    for msg in messages:
-        role = msg.get("role")
-        if role == "system":
-            content = msg.get("content", "")
-            if isinstance(content, str):
-                hash_parts.append(content)
-        elif role == "user":
-            content = msg.get("content", "")
-            if isinstance(content, str):
-                hash_parts.append(content)
-            break  # only first user message
+    # 3. Prefix-ancestor inheritance (requires DB + interned messages)
+    if message_ids and db is not None and user_id is not None:
+        parent_conv_id = _resolve_prefix_ancestor(message_ids, user_id, db)
+        if parent_conv_id is not None:
+            return parent_conv_id
 
-    if not hash_parts:
-        # Fallback: hash the full first message
-        if messages:
-            hash_parts.append(str(messages[0]))
+    # 4. Mint fresh id — no structural link, so this is a new conversation
+    return f"or-{_uuid.uuid4().hex[:16]}"
 
-    # Salt with api_key prefix so different keys never share buckets
-    salted = api_key_prefix + "|" + "|".join(hash_parts)
-    digest = hashlib.sha256(salted.encode()).hexdigest()[:16]
-    return f"or-derived-{digest}"
+
+def _resolve_prefix_ancestor(
+    message_ids: list[_uuid.UUID],
+    user_id: _uuid.UUID,
+    db: Session,
+) -> str | None:
+    """Find an existing entry whose message_ids is a proper prefix.
+
+    Returns the entry's conversation_id if found, None otherwise.
+    Scans recent entries (same user) ordered by creation time descending
+    so the most-recent prefix-match wins when there are ties.
+    """
+    if len(message_ids) < 2:
+        return None
+
+    candidates = db.exec(
+        select(LogEntry)
+        .where(
+            LogEntry.user_id == user_id,
+            LogEntry.conversation_id.is_not(None),
+        )
+        .order_by(LogEntry.created_at.desc())
+    ).all()
+
+    # Sort by prefix length descending for greedy longest-match
+    candidates.sort(key=lambda e: len(e.message_ids), reverse=True)
+
+    for candidate in candidates:
+        prefix = candidate.message_ids
+        if not prefix:
+            continue
+        if len(prefix) >= len(message_ids):
+            continue  # must be a *proper* prefix
+        if message_ids[: len(prefix)] == prefix:
+            return candidate.conversation_id
+
+    return None
 
 
 def map_to_log_entry(
-    ctx,
+    ctx: "ProxyContext",
     upstream_response: dict,
     conversation_id_header: str | None = None,
 ) -> LogEntryCreate:
@@ -113,7 +176,7 @@ def map_to_log_entry(
 
     # ---- Request ----
     messages = [
-        CanonicalMessage(role=m.get("role", "user"), content=m.get("content", ""))
+        _to_canonical_message(m)
         for m in request_body.get("messages", [])
     ]
     params = {k: v for k, v in request_body.items() if k not in ("messages", "model")}
@@ -126,7 +189,7 @@ def map_to_log_entry(
         finish_reason = choices[0].get("finish_reason")
         tool_calls = _extract_tool_calls(choices[0])
     else:
-        response_message = CanonicalMessage(role="assistant", content="")
+        response_message = _to_canonical_message({"role": "assistant", "content": ""})
         finish_reason = None
         tool_calls = []
 
@@ -134,10 +197,13 @@ def map_to_log_entry(
 
     # ---- Usage ----
     usage = upstream_response.get("usage", {})
+    details = usage.get("completion_tokens_details") or {}
+    reasoning_tokens = details.get("reasoning_tokens", 0) or 0
     usage_payload = UsagePayload(
         prompt_tokens=usage.get("prompt_tokens", 0),
         completion_tokens=usage.get("completion_tokens", 0),
         total_tokens=usage.get("total_tokens", 0),
+        reasoning_tokens=reasoning_tokens,
     )
 
     # ---- Cost ----
@@ -180,7 +246,7 @@ def map_to_log_entry(
 
 
 def map_error_to_log_entry(
-    ctx,
+    ctx: "ProxyContext",
     error: Exception,
     conversation_id_header: str | None = None,
 ) -> LogEntryCreate:
@@ -189,14 +255,14 @@ def map_error_to_log_entry(
     model = ctx.model
 
     messages = [
-        CanonicalMessage(role=m.get("role", "user"), content=m.get("content", ""))
+        _to_canonical_message(m)
         for m in request_body.get("messages", [])
     ]
     params = {k: v for k, v in request_body.items() if k not in ("messages", "model")}
     request = RequestPayload(messages=messages, params=params)
 
     response = ResponsePayload(
-        message=CanonicalMessage(role="assistant", content=""),
+        message=_to_canonical_message({"role": "assistant", "content": ""}),
         finish_reason=None,
     )
 

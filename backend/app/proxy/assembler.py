@@ -24,6 +24,10 @@ class StreamAssembler:
         # Accumulated message content (text)
         self._content_parts: list[str] = []
 
+        # Accumulated reasoning (text and structured)
+        self._reasoning_parts: list[str] = []
+        self._reasoning_details: list[dict] = []
+
         # Accumulated tool calls by index
         self._tool_calls: dict[int, dict[str, Any]] = {}
 
@@ -53,6 +57,28 @@ class StreamAssembler:
             if content is not None and content != "":
                 self._content_parts.append(content)
 
+            # Reasoning text
+            reasoning = delta.get("reasoning")
+            if reasoning is not None and reasoning != "":
+                self._reasoning_parts.append(reasoning)
+
+            # Reasoning details (streamed as structured fragments)
+            reasoning_details = delta.get("reasoning_details", [])
+            for rd in reasoning_details:
+                idx = rd.get("index", 0)
+                if idx >= len(self._reasoning_details):
+                    self._reasoning_details.extend(
+                        [{} for _ in range(idx - len(self._reasoning_details) + 1)]
+                    )
+                existing = self._reasoning_details[idx]
+                for key in ("type", "text", "summary", "signature"):
+                    val = rd.get(key)
+                    if val is not None and val != "":
+                        if key == "text" and key in existing:
+                            existing[key] += val
+                        else:
+                            existing[key] = val
+
             # Tool calls (streamed as fragments with index)
             tool_calls = delta.get("tool_calls", [])
             for tc in tool_calls:
@@ -81,9 +107,22 @@ class StreamAssembler:
         if self._tool_calls:
             tool_calls = [self._tool_calls[i] for i in sorted(self._tool_calls)]
 
+        reasoning_str: str | None = (
+            "".join(self._reasoning_parts) if self._reasoning_parts else None
+        )
+        reasoning_details: list[dict] | None = (
+            [d for d in self._reasoning_details if d]
+            if self._reasoning_details
+            else None
+        )
+
         message: dict[str, Any] = {"role": "assistant"}
         if content is not None:
             message["content"] = content
+        if reasoning_str is not None:
+            message["reasoning"] = reasoning_str
+        if reasoning_details:
+            message["reasoning_details"] = reasoning_details
         if tool_calls:
             message["tool_calls"] = tool_calls
 

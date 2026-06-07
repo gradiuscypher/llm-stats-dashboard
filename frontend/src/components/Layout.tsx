@@ -12,6 +12,7 @@ interface LayoutProps {
 const NAV_LINKS = [
   { to: "/", label: "Dashboard" },
   { to: "/logs", label: "Logs" },
+  { to: "/conversations", label: "Conversations" },
   { to: "/api-keys", label: "API Keys" },
   { to: "/docs", label: "Docs" },
   { to: "/settings", label: "Settings" },
@@ -42,6 +43,7 @@ export function Layout({ children }: LayoutProps) {
               <Link
                 key={link.to}
                 to={link.to}
+                activeOptions={{ exact: true }}
                 className="text-xs font-bold uppercase tracking-wider no-underline text-[var(--color-text-muted)] hover:text-[var(--color-text)] [&.active]:text-[var(--color-text)] [&.active]:border-b [&.active]:border-[var(--color-text)]"
               >
                 {link.label}

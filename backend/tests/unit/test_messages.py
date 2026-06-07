@@ -8,11 +8,9 @@ several models are not supported by SQLite.
 import uuid
 
 import pytest
-from sqlmodel import Session
 
 from app.models.log_entry import LogEntry  # noqa: F401
 from app.models.message import Message  # noqa: F401
-from app.models.user import User  # noqa: F401
 from app.services.messages import (
     batch_rehydrate_messages,
     content_hash,
@@ -20,7 +18,6 @@ from app.services.messages import (
     rehydrate_messages,
     resolve_parent_entry_id,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures — piggyback on the Postgres engine from tests/conftest.py
@@ -70,6 +67,38 @@ def test_hash_differs_on_role_change():
     assert content_hash({"role": "user", "content": "x"}) != content_hash(
         {"role": "assistant", "content": "x"}
     )
+
+
+def test_hash_stable_when_no_reasoning_present():
+    """Plain messages (no reasoning fields) must hash identically to before.
+    Uses exclude_none=True to ensure absent optional fields don't affect the hash.
+    """
+    msg = {"role": "user", "content": "hello"}
+    expected = content_hash(msg)
+    assert expected == content_hash(msg)
+    # Round-trip through CanonicalMessage with exclude_none
+    from app.schemas.log_entry import CanonicalMessage
+    cm = CanonicalMessage(role="user", content="hello")
+    assert content_hash(cm.model_dump(exclude_none=True)) == expected
+
+
+def test_hash_differs_when_reasoning_differs():
+    """Two messages with same content but different reasoning must NOT collide."""
+    msg1 = {"role": "assistant", "content": "Answer", "reasoning": "Think A"}
+    msg2 = {"role": "assistant", "content": "Answer", "reasoning": "Think B"}
+    assert content_hash(msg1) != content_hash(msg2)
+
+
+def test_hash_differs_when_reasoning_details_differs():
+    msg1 = {
+        "role": "assistant", "content": "X",
+        "reasoning_details": [{"type": "reasoning.text", "text": "A"}],
+    }
+    msg2 = {
+        "role": "assistant", "content": "X",
+        "reasoning_details": [{"type": "reasoning.text", "text": "B"}],
+    }
+    assert content_hash(msg1) != content_hash(msg2)
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +221,45 @@ def test_no_parent_for_first_call(db, db_user_id):
     assert result is None
 
 
+def test_disjoint_messages_no_parent(pg_engine, user_id):
+    """Entries with completely different first messages must not link as parent."""
+    from sqlmodel import Session
+
+    with Session(pg_engine) as db:
+        from app.models.user import User
+        from app.security.passwords import hash_password
+        user = User(id=user_id, username="u", password_hash=hash_password("x"))
+        db.add(user)
+        db.flush()
+
+        # Entry A: [msg_apple]
+        msgs_a = [{"role": "user", "content": "apple"}]
+        ids_a = intern_messages(msgs_a, user_id, db)
+        entry_a_id = uuid.uuid4()
+        db.add(LogEntry(
+            id=entry_a_id,
+            user_id=user_id,
+            conversation_id="conv-disjoint",
+            message_ids=ids_a,
+            provider="openai", model="gpt-4o",
+            request={},
+            response={"message": {"role": "assistant", "content": "A"}, "finish_reason": "stop"},
+        ))
+        db.flush()
+
+        # Entry B: [msg_banana, msg_cherry] — completely different first message
+        msgs_b = [
+            {"role": "user", "content": "banana"},
+            {"role": "assistant", "content": "cherry"},
+        ]
+        ids_b = intern_messages(msgs_b, user_id, db)
+
+        parent = resolve_parent_entry_id(ids_b, "conv-disjoint", user_id, uuid.uuid4(), db)
+        assert parent is None, (
+            "Disjoint message sets (different first message) must not resolve to a parent"
+        )
+
+
 def test_parent_resolved_for_linear_append(pg_engine, user_id):
     """Entry 2 is a linear append of entry 1; parent should be entry 1's id."""
     from sqlmodel import Session
@@ -205,7 +273,10 @@ def test_parent_resolved_for_linear_append(pg_engine, user_id):
         db.flush()
 
         msgs_1 = [{"role": "user", "content": "Hello"}]
-        msgs_2 = msgs_1 + [{"role": "assistant", "content": "Hi"}, {"role": "user", "content": "More"}]
+        msgs_2 = msgs_1 + [
+            {"role": "assistant", "content": "Hi"},
+            {"role": "user", "content": "More"},
+        ]
 
         ids_1 = intern_messages(msgs_1, user_id, db)
         ids_2 = intern_messages(msgs_2, user_id, db)
@@ -217,7 +288,11 @@ def test_parent_resolved_for_linear_append(pg_engine, user_id):
             conversation_id="conv-x",
             message_ids=ids_1,
             provider="openai", model="gpt-4o",
-            request={}, response={"message": {"role": "assistant", "content": "Hi"}, "finish_reason": "stop"},
+            request={},
+            response={
+                "message": {"role": "assistant", "content": "Hi"},
+                "finish_reason": "stop",
+            },
         )
         db.add(entry_1)
         db.flush()
