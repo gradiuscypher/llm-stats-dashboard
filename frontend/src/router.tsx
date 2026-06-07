@@ -14,6 +14,7 @@ import { DashboardPage } from "@/routes/dashboard";
 import { LogsPage } from "@/routes/logs";
 import { LogDetailPage } from "@/routes/log-detail";
 import { ConversationPage } from "@/routes/conversation";
+import { ConversationsPage } from "@/routes/conversations";
 import { ApiKeysPage } from "@/routes/api-keys";
 import { DocsPage } from "@/routes/docs";
 import { SettingsPage } from "@/routes/settings";
@@ -86,6 +87,13 @@ const conversationRoute = createRoute({
   },
 });
 
+const conversationsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/conversations",
+  beforeLoad: requireAuth,
+  component: ConversationsPage,
+});
+
 const apiKeysRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/api-keys",
@@ -117,6 +125,7 @@ const routeTree = rootRoute.addChildren([
   logsRoute,
   logDetailRoute,
   conversationRoute,
+  conversationsRoute,
   apiKeysRoute,
   docsRoute,
   settingsRoute,

@@ -8,6 +8,13 @@ available doc page. All pages are served as raw Markdown by the API at
 
 ## Quick start
 
+**Using the proxy (automatic logging)**:
+1. [Register an account](endpoints/auth.md) via `POST /api/v1/users`
+2. Log in to get a session cookie — `POST /api/v1/auth/login`
+3. [Create an API key](endpoints/api-keys.md) with `proxy:use` scope
+4. Point your OpenRouter client at our base URL — see **[LLM Proxy](proxy.md)**
+
+**Using the push API (manual logging)**:
 1. [Register an account](endpoints/auth.md) via `POST /api/v1/users`
 2. Log in to get a session cookie — `POST /api/v1/auth/login`
 3. [Create an API key](endpoints/api-keys.md) with `logs:write` scope
@@ -25,6 +32,7 @@ available doc page. All pages are served as raw Markdown by the API at
 | [Log Ingestion & Retrieval](endpoints/logs.md) | `POST /logs` ingest + read endpoints |
 | [Canonical Schema Reference](schemas.md) | Full log payload schema with field docs |
 | [AI Client Guide](ai-client-guide.md) | **Hand this to an AI to auto-generate a client** |
+| [LLM Proxy](proxy.md) | **Drop-in OpenRouter proxy with automatic logging** |
 
 ---
 

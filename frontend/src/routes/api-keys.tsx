@@ -6,7 +6,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/Button";
 import { Field } from "@/components/Field";
 
-const SCOPE_OPTIONS = ["logs:write", "logs:read"];
+const SCOPE_OPTIONS = ["logs:write", "logs:read", "proxy:use"];
 
 function CreatedKeyBanner({ raw_key, onDismiss }: { raw_key: string; onDismiss: () => void }) {
   const [copied, setCopied] = useState(false);

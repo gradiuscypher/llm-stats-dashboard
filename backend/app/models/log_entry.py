@@ -21,6 +21,9 @@ class LogEntry(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     user_id: uuid.UUID = Field(foreign_key="users.id", index=True)
 
+    # Which API key made this call (nullable — old rows / non-key paths may not have one)
+    api_key_id: uuid.UUID | None = Field(default=None, foreign_key="api_keys.id", index=True)
+
     # Conversation grouping (client-supplied)
     conversation_id: str | None = Field(default=None, index=True, max_length=256)
 
@@ -51,6 +54,7 @@ class LogEntry(SQLModel, table=True):
     prompt_tokens: int = Field(default=0)
     completion_tokens: int = Field(default=0)
     total_tokens: int = Field(default=0)
+    reasoning_tokens: int = Field(default=0)
 
     # Cost
     cost_total: float | None = Field(default=None)

@@ -10,7 +10,12 @@ from app.services.cost import resolve_cost
 from app.services.messages import intern_messages, resolve_parent_entry_id
 
 
-def ingest_log_entry(payload: LogEntryCreate, user_id: uuid.UUID, db: Session) -> LogEntry:
+def ingest_log_entry(
+    payload: LogEntryCreate,
+    user_id: uuid.UUID,
+    db: Session,
+    api_key_id: uuid.UUID | None = None,
+) -> LogEntry:
     """Validate, enrich, and persist one LLM call log entry.
 
     Message deduplication strategy
@@ -26,7 +31,7 @@ def ingest_log_entry(payload: LogEntryCreate, user_id: uuid.UUID, db: Session) -
     cost_total, cost_currency, cost_source = resolve_cost(payload, db)
 
     # --- Intern messages ---------------------------------------------------
-    raw_messages = [m.model_dump() for m in payload.request.messages]
+    raw_messages = [m.model_dump(exclude_none=True) for m in payload.request.messages]
     message_ids = intern_messages(raw_messages, user_id, db)
 
     # Strip messages from the request blob; keep params + extras only.
@@ -47,6 +52,7 @@ def ingest_log_entry(payload: LogEntryCreate, user_id: uuid.UUID, db: Session) -
     entry = LogEntry(
         id=entry_id,
         user_id=user_id,
+        api_key_id=api_key_id,
         conversation_id=payload.conversation_id,
         message_ids=message_ids,
         parent_entry_id=parent_entry_id,
@@ -59,6 +65,7 @@ def ingest_log_entry(payload: LogEntryCreate, user_id: uuid.UUID, db: Session) -
         prompt_tokens=payload.usage.prompt_tokens,
         completion_tokens=payload.usage.completion_tokens,
         total_tokens=payload.usage.total_tokens,
+        reasoning_tokens=payload.usage.reasoning_tokens,
         cost_total=cost_total,
         cost_currency=cost_currency,
         cost_source=cost_source,
