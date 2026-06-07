@@ -43,8 +43,9 @@ def _enable_proxy_config(monkeypatch):
 # ---------------------------------------------------------------------------
 
 class TestProxyHealth:
-    def test_health_without_key(self, client):
+    def test_health_without_key(self, client, monkeypatch):
         """Health endpoint returns degraded when no API key is configured."""
+        monkeypatch.setattr(settings, "openrouter_api_key", "")
         resp = client.get("/api/v1/proxy/health")
         assert resp.status_code == 200
         body = resp.json()
@@ -81,7 +82,8 @@ class TestProxyModels:
         assert resp.status_code == 200
         assert resp.json() == mock_data
 
-    def test_models_no_key(self, client):
+    def test_models_no_key(self, client, monkeypatch):
+        monkeypatch.setattr(settings, "openrouter_api_key", "")
         resp = client.get("/api/v1/models")
         assert resp.status_code == 503
 
@@ -241,3 +243,59 @@ class TestProxyChatNonStream:
             headers={**_bearer_headers(raw_key), "Content-Type": "application/json"},
         )
         assert resp.status_code == 413
+
+    @respx.mock
+    def test_proxy_persists_reasoning(self, auth_client, monkeypatch):
+        """Non-streaming call with reasoning should return reasoning in response.
+
+        The proxy passes through the full upstream response including reasoning
+        fields and completion_tokens_details. Persistence is verified via unit
+        test (TestMapToLogEntry.test_maps_reasoning_in_response).
+        """
+        _enable_proxy_config(monkeypatch)
+        raw_key = _create_api_key(auth_client, ["proxy:use"])
+
+        upstream_response = {
+            "id": "chatcmpl-reasoning-1",
+            "object": "chat.completion",
+            "model": "gpt-4o",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "The answer is 4.",
+                    "reasoning": "Let me think: 2+2=4. That's correct.",
+                    "reasoning_details": [
+                        {"type": "reasoning.text", "text": "2+2=4"},
+                        {"type": "reasoning.encrypted", "text": "enc=="},
+                    ],
+                },
+                "finish_reason": "stop",
+            }],
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 12,
+                "total_tokens": 22,
+                "completion_tokens_details": {"reasoning_tokens": 8},
+            },
+        }
+        respx.post("https://openrouter.ai/api/v1/chat/completions").mock(
+            return_value=httpx.Response(200, json=upstream_response)
+        )
+
+        resp = auth_client.post(
+            "/api/v1/chat/completions",
+            json={
+                "model": "gpt-4o",
+                "messages": [{"role": "user", "content": "What is 2+2?"}],
+            },
+            headers=_bearer_headers(raw_key),
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        msg = body["choices"][0]["message"]
+        assert msg["reasoning"] == "Let me think: 2+2=4. That's correct."
+        assert len(msg["reasoning_details"]) == 2
+        assert msg["reasoning_details"][1]["type"] == "reasoning.encrypted"
+        details = body["usage"].get("completion_tokens_details") or {}
+        assert details.get("reasoning_tokens") == 8

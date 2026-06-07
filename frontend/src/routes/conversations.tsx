@@ -25,34 +25,63 @@ function fmtDate(iso: string) {
 
 const PAGE_SIZES = [10, 20, 50, 100] as const;
 
+type SortColumn = "last_activity" | "first_activity" | "total_tokens" | "total_cost" | "call_count";
+
+const SORT_COLUMNS: { col: SortColumn; label: string }[] = [
+  { col: "last_activity", label: "Last activity" },
+  { col: "total_tokens", label: "Tokens" },
+  { col: "total_cost", label: "Cost" },
+  { col: "call_count", label: "Calls" },
+];
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export function LogsPage() {
+export function ConversationsPage() {
   const [model, setModel] = useState("");
   const [provider, setProvider] = useState("");
   const [conversationId, setConversationId] = useState("");
   const [offset, setOffset] = useState(0);
   const [pageSize, setPageSize] = useState<number>(20);
+  const [sort, setSort] = useState<SortColumn>("last_activity");
+  const [order, setOrder] = useState<"asc" | "desc">("desc");
 
-  const { data: logs = [], isLoading } = useQuery({
-    queryKey: ["logs", { model, provider, conversationId, offset, pageSize }],
+  const { data, isLoading } = useQuery({
+    queryKey: ["conversations", { model, provider, conversationId, sort, order, offset, pageSize }],
     queryFn: () =>
-      logsApi.list({
+      logsApi.listConversations({
         model: model || undefined,
         provider: provider || undefined,
         conversation_id: conversationId || undefined,
+        sort,
+        order,
         limit: pageSize,
         offset,
       }),
   });
 
-  const start = logs.length > 0 ? offset + 1 : 0;
-  const end = offset + logs.length;
-  const hasMore = logs.length >= pageSize;
+  const rows = data?.conversations ?? [];
+  const total = data?.total ?? 0;
+  const start = rows.length > 0 ? offset + 1 : 0;
+  const end = offset + rows.length;
+
+  function toggleSort(col: SortColumn) {
+    if (sort === col) {
+      setOrder((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSort(col);
+      setOrder("desc");
+    }
+    setOffset(0);
+  }
+
+  function sortIndicator(col: SortColumn) {
+    if (sort !== col) return null;
+    return order === "asc" ? "▲" : "▼";
+  }
 
   return (
     <Layout>
-      <PageHeader title="Logs" subtitle="All LLM calls" />
+      <PageHeader title="Conversations" subtitle="Grouped by conversation" />
 
       {/* Filters */}
       <div className="flex gap-3 mb-4 flex-wrap">
@@ -87,60 +116,56 @@ export function LogsPage() {
             <table>
               <thead>
                 <tr>
-                  <th>Timestamp</th>
-                  <th>Model</th>
                   <th>Conversation</th>
-                  <th>API Key</th>
-                  <th>Tokens</th>
-                  <th>Cost</th>
-                  <th>Latency</th>
+                  {SORT_COLUMNS.map(({ col, label }) => (
+                    <th key={col} className="cursor-pointer select-none" onClick={() => toggleSort(col)}>
+                      {label} <span className="text-[var(--color-accent)]">{sortIndicator(col)}</span>
+                    </th>
+                  ))}
+                  <th>Models</th>
+                  <th>Providers</th>
                   <th>Status</th>
                 </tr>
               </thead>
               <tbody>
-                {logs.map((log) => (
-                  <tr key={log.id} className="hover:bg-[var(--color-bg-alt)]">
-                    <td className="tabular-nums whitespace-nowrap">
+                {rows.map((row) => (
+                  <tr key={row.conversation_id} className="hover:bg-[var(--color-bg-alt)]">
+                    <td>
                       <Link
-                        to="/logs/$logId"
-                        params={{ logId: log.id }}
-                        className="no-underline hover:underline"
+                        to="/conversations/$conversationId"
+                        params={{ conversationId: row.conversation_id }}
+                        className="text-xs no-underline hover:underline"
                       >
-                        {fmtDate(log.created_at)}
+                        {row.conversation_id}
                       </Link>
                     </td>
-                    <td>
-                      <span className="text-xs">{log.model}</span>
-                      <span className="ml-1 text-[var(--color-text-faint)] text-xs">{log.provider}</span>
+                    <td className="tabular-nums whitespace-nowrap">
+                      {fmtDate(row.last_activity)}
                     </td>
-                    <td>
-                      {log.conversation_id ? (
-                        <Link
-                          to="/conversations/$conversationId"
-                          params={{ conversationId: log.conversation_id }}
-                          className="text-xs no-underline hover:underline"
-                        >
-                          {log.conversation_id}
-                        </Link>
-                      ) : (
-                        <span className="text-[var(--color-text-faint)] text-xs">—</span>
-                      )}
-                    </td>
+                    <td className="tabular-nums">{row.total_tokens.toLocaleString()}</td>
+                    <td className="tabular-nums">{fmtCost(row.total_cost)}</td>
+                    <td className="tabular-nums">{row.call_count}</td>
                     <td>
                       <span className="text-xs">
-                        {log.api_key_name ?? "Legacy"}
+                        {row.models.length <= 2
+                          ? row.models.join(", ")
+                          : `${row.models[0]}, ${row.models[1]} +${row.models.length - 2}`}
                       </span>
                     </td>
-                    <td className="tabular-nums">{log.total_tokens.toLocaleString()}</td>
-                    <td className="tabular-nums">{fmtCost(log.cost_total)}</td>
-                    <td className="tabular-nums">{log.latency_ms != null ? `${log.latency_ms}ms` : "—"}</td>
-                    <td><StatusBadge status={log.status} /></td>
+                    <td>
+                      <span className="text-xs text-[var(--color-text-faint)]">
+                        {row.providers.join(", ")}
+                      </span>
+                    </td>
+                    <td>
+                      <StatusBadge status={row.has_error ? "error" : "ok"} />
+                    </td>
                   </tr>
                 ))}
-                {logs.length === 0 && (
+                {rows.length === 0 && (
                   <tr>
                     <td colSpan={8} className="text-center text-[var(--color-text-faint)] py-6">
-                      No logs found.
+                      No conversations found.
                     </td>
                   </tr>
                 )}
@@ -151,7 +176,7 @@ export function LogsPage() {
           {/* Pagination */}
           <div className="flex gap-3 mt-3 justify-end items-center">
             <span className="text-xs text-[var(--color-text-muted)]">
-              {logs.length > 0 ? `${start}–${end}` : "0"}
+              {rows.length > 0 ? `${start}–${end} of ${total}` : "0"}
             </span>
 
             <select
@@ -176,7 +201,7 @@ export function LogsPage() {
               <Button
                 variant="secondary"
                 size="sm"
-                disabled={!hasMore}
+                disabled={offset + pageSize >= total}
                 onClick={() => setOffset(offset + pageSize)}
               >
                 Next

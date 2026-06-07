@@ -44,6 +44,10 @@ export function DashboardPage() {
             <StatCard label="Total Calls" value={fmtNum(stats?.total_calls ?? 0)} />
             <StatCard label="Total Tokens" value={fmtNum(stats?.total_tokens ?? 0)} />
             <StatCard
+              label="Reasoning Tokens"
+              value={fmtNum(stats?.total_reasoning_tokens ?? 0)}
+            />
+            <StatCard
               label="Total Cost"
               value={fmtCost(stats?.total_cost ?? null)}
               sub="USD"
@@ -74,7 +78,11 @@ export function DashboardPage() {
                     fontSize: 11,
                     border: "1px solid var(--color-border-strong)",
                     borderRadius: 0,
+                    backgroundColor: "var(--color-surface)",
+                    color: "var(--color-text)",
                   }}
+                  labelStyle={{ color: "var(--color-text)" }}
+                  itemStyle={{ color: "var(--color-text)" }}
                 />
                 <Line
                   type="monotone"
@@ -100,6 +108,7 @@ export function DashboardPage() {
                   <th>Model</th>
                   <th>Calls</th>
                   <th>Tokens</th>
+                  <th>Reasoning</th>
                   <th>Cost</th>
                 </tr>
               </thead>
@@ -117,6 +126,7 @@ export function DashboardPage() {
                     </td>
                     <td className="tabular-nums">{fmtNum(row.calls)}</td>
                     <td className="tabular-nums">{fmtNum(row.total_tokens)}</td>
+                    <td className="tabular-nums">{fmtNum(row.reasoning_tokens)}</td>
                     <td className="tabular-nums">{fmtCost(row.cost)}</td>
                   </tr>
                 ))}

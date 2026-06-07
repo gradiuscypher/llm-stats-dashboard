@@ -114,12 +114,19 @@ grouped correctly in the dashboard.
 
 1. **Explicit header** (best): `X-Conversation-Id: my-session-123`
 2. **OpenRouter `user` field**: from `request_body.user`
-3. **Derived** (fallback): hash of the leading system + first user message,
-   salted per API key
+3. **Prefix-ancestor inheritance**: if the new request's messages extend an
+   existing entry's `message_ids` (i.e. the client resends full history with
+   a new turn), the new call inherits that existing entry's `conversation_id`.
+   This matches how stateless chat APIs work and chains multi-turn sessions
+   correctly regardless of how much wall-clock time passes between turns.
+4. **Fresh UUID**: when no structural link is found, a new conversation_id
+   is minted — guaranteeing unrelated sessions with coincidentally similar
+   opening messages never merge.
 
 ### Recommended: use X-Conversation-Id
 
-For guaranteed correct grouping, set the `X-Conversation-Id` header:
+For guaranteed correct grouping across clients that don't resend full history
+(sliding-window context, summarization, etc.), set the `X-Conversation-Id` header:
 
 ```bash
 curl http://localhost:8000/api/v1/chat/completions \
@@ -131,15 +138,16 @@ curl http://localhost:8000/api/v1/chat/completions \
 
 ### Derived-id behaviour and tradeoffs
 
-When no explicit id is provided, the proxy derives one from message content.
+When no explicit id is provided, the proxy derives one from message structure.
 This works well for most cases but has known edge cases:
 
 | Scenario | Behaviour |
 |----------|-----------|
-| Two sessions with the same system prompt + first message | Same bucket, but prefix-based parent detection keeps them as **separate trees** — visible as branches, not corrupted |
-| Client rewrites the system prompt mid-conversation | New bucket = new conversation in the dashboard; old messages remain accessible |
-| Single-shot calls (no history) | Each call is its own conversation — correct |
-| Concurrent calls in the same growing thread | Transient mis-attribution possible; self-correcting on next call |
+| Multi-turn with full history | Turn N+1 chains to turn N via prefix match — one conversation |
+| Two separate sessions, same first message | Each gets its own UUID — **no merge** |
+| Client truncates history (sliding window) | Prefix chain breaks → new conversation — over-split, not merge |
+| Retry of first message within an existing conversation | New first message lacks a proper-prefix ancestor → new conversation; use `X-Conversation-Id` to keep retries grouped |
+| Same session, long idle between turns | Prefix match doesn't care about wall-clock time — still chains correctly |
 
 The derived id is **purely a logging concern** — it never affects the bytes
 returned to the client.
@@ -173,6 +181,22 @@ for chunk in response:
 The proxy captures cost from OpenRouter's native `usage.cost` field when
 available (marked as `cost_source="client"` in logs). This is more accurate
 than the push-based model which had to compute cost from a pricing table.
+
+## Reasoning / thinking capture
+
+The proxy captures **all** assistant output — including reasoning/thinking
+blocks from reasoning-capable models. Both paths are covered:
+
+- **Streaming**: `delta.reasoning` and `delta.reasoning_details` fragments
+  are accumulated by the stream assembler.
+- **Non-streaming**: `message.reasoning` and `message.reasoning_details` are
+  passed through from the upstream response.
+- **Usage**: `completion_tokens_details.reasoning_tokens` is captured as
+  `reasoning_tokens` in the log entry.
+
+Reasoning is stored on the assistant message and surfaced in the conversation
+transcript and log detail views as a collapsible "Thinking" block.
+Encrypted/redacted reasoning blocks are shown as labeled placeholders.
 
 ---
 

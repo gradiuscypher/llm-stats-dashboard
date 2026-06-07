@@ -101,7 +101,7 @@ dev: ## Run backend + frontend dev servers (requires two terminals or tmux)
 
 .PHONY: dev-backend
 dev-backend: ## Run FastAPI backend with hot reload
-	cd $(BACKEND_DIR) && uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+	cd $(BACKEND_DIR) && uv run uvicorn app.main:app --reload --reload-dir app --host 0.0.0.0 --port 8000
 
 .PHONY: dev-frontend
 dev-frontend: ## Run Vite frontend dev server

@@ -81,6 +81,8 @@ this schema.
 |-------|------|-------------|
 | `role` | `"system"\|"user"\|"assistant"\|"tool"` | Message author |
 | `content` | string \| parts[] | Text string, or structured parts array for multimodal content |
+| `reasoning` | string\|null | Reasoning/thinking text (from reasoning models like o1, DeepSeek-R1, etc.) |
+| `reasoning_details` | object[]\|null | Structured reasoning blocks (provider-native format; may include encrypted/redacted entries) |
 
 **Multimodal content** (structured parts):
 ```json
@@ -117,12 +119,18 @@ this schema.
 {
   "prompt_tokens": 22,
   "completion_tokens": 3,
-  "total_tokens": 25
+  "total_tokens": 25,
+  "reasoning_tokens": 8
 }
 ```
 
+All fields default to `0` if omitted. `reasoning_tokens` captures
+`completion_tokens_details.reasoning_tokens` from providers that report it.
+
 All fields default to `0` if omitted. `total_tokens` is used for cost
-computation if individual counts aren't available.
+computation if individual counts aren't available. `reasoning_tokens`
+is reported by reasoning/thinking-capable models (e.g. reasoning models
+on OpenRouter).
 
 ---
 

@@ -1,5 +1,9 @@
 """FastAPI application factory."""
 
+from app.logging_config import configure_logging
+
+configure_logging()
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -8,13 +12,57 @@ from slowapi.util import get_remote_address
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import Response as StarletteResponse
 
+import logging
+
 from app.config import settings
 from app.routers import api_keys, auth, docs_router, health, logs, proxy, users
+
+request_logger = logging.getLogger("app.requests")
 
 # ---------------------------------------------------------------------------
 # Rate limiter
 # ---------------------------------------------------------------------------
 limiter = Limiter(key_func=get_remote_address)
+
+# ---------------------------------------------------------------------------
+# Request logging middleware
+# ---------------------------------------------------------------------------
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(  # type: ignore[override]
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> StarletteResponse:
+        # Log auth headers at DEBUG so they're visible when diagnosing 401s.
+        # We redact the key value but show which header was used + key prefix.
+        auth_header = request.headers.get("authorization", "")
+        x_api_key   = request.headers.get("x-api-key", "")
+        if auth_header:
+            # Show scheme + first 20 chars of credential only
+            parts = auth_header.split(" ", 1)
+            scheme = parts[0]
+            cred   = parts[1][:20] + "..." if len(parts) > 1 else ""
+            auth_display = f"{scheme} {cred}"
+        elif x_api_key:
+            auth_display = f"X-API-Key {x_api_key[:20]}..."
+        else:
+            auth_display = "(none)"
+
+        request_logger.debug(
+            "%s %s  auth=%s",
+            request.method,
+            request.url.path,
+            auth_display,
+        )
+
+        response = await call_next(request)
+
+        request_logger.debug(
+            "%s %s  → %s",
+            request.method,
+            request.url.path,
+            response.status_code,
+        )
+        return response
+
 
 # ---------------------------------------------------------------------------
 # Security headers middleware
@@ -70,6 +118,9 @@ def create_app() -> FastAPI:
     # Rate limiter
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
+
+    # Request logging (DEBUG-level; logs auth header prefix + status)
+    app.add_middleware(RequestLoggingMiddleware)
 
     # Security headers
     app.add_middleware(SecurityHeadersMiddleware)

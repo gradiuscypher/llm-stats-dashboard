@@ -227,13 +227,16 @@ async def _handle_stream(
                     yield raw_bytes
 
             # Stream complete — assemble full response for logging
+            logger.info("Stream finished for model=%s — assembling response", ctx.model)
             ctx.response_body = assembler.assemble()
             ctx.usage = assembler.usage
             ctx.finish_reason = assembler.finish_reason
             ctx.status_code = 200
 
             # Fire on_response for logging (best-effort, after stream to client)
+            logger.info("Calling pipeline.on_response for model=%s", ctx.model)
             await pipeline.on_response(ctx)
+            logger.info("pipeline.on_response completed for model=%s", ctx.model)
 
         except httpx.HTTPStatusError as e:
             await pipeline.on_error(ctx, e)

@@ -63,6 +63,12 @@ function DividerBar({ divider }: { divider: CallDivider }) {
         <span>{divider.model}</span>
         <span className="text-[var(--color-border)]">·</span>
         <span>{divider.total_tokens.toLocaleString()} tok</span>
+        {divider.reasoning_tokens > 0 && (
+          <>
+            <span className="text-[var(--color-border)]">·</span>
+            <span className="text-[var(--color-text-faint)]">{divider.reasoning_tokens.toLocaleString()} think</span>
+          </>
+        )}
         {divider.latency_ms != null && (
           <>
             <span className="text-[var(--color-border)]">·</span>
@@ -81,6 +87,70 @@ function DividerBar({ divider }: { divider: CallDivider }) {
   );
 }
 
+// ─── Reasoning Block ──────────────────────────────────────────────────────────
+
+function ReasoningBlock({
+  reasoning,
+  reasoning_details,
+}: {
+  reasoning?: string | null;
+  reasoning_details?: unknown[] | null;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  const hasReasoning = typeof reasoning === "string" && reasoning.trim().length > 0;
+  const hasDetails = Array.isArray(reasoning_details) && reasoning_details.length > 0;
+  if (!hasReasoning && !hasDetails) return null;
+
+  return (
+    <div className="mt-2 border border-[var(--color-border)] bg-[var(--color-bg-alt)]">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full px-3 py-1.5 flex items-center gap-1.5 text-[10px]
+                   font-bold uppercase tracking-widest
+                   text-[var(--color-text-muted)] hover:text-[var(--color-text)]
+                   bg-transparent border-none cursor-pointer transition-colors"
+      >
+        <span className="text-[11px]">{expanded ? "▾" : "▸"}</span>
+        Thinking
+        {hasReasoning && (
+          <span className="font-normal lowercase tracking-normal opacity-50">
+            ({reasoning!.length} chars)
+          </span>
+        )}
+      </button>
+      {expanded && (
+        <div
+          className="px-3 pb-2 text-xs whitespace-pre-wrap leading-relaxed
+                     text-[var(--color-text-muted)] opacity-80"
+        >
+          {hasReasoning && <p>{reasoning}</p>}
+          {hasDetails &&
+            reasoning_details!.map((block, i) => {
+              if (typeof block === "object" && block !== null) {
+                const b = block as Record<string, unknown>;
+                const type = typeof b.type === "string" ? b.type : "";
+                const text = typeof b.text === "string" ? b.text : "";
+                // Encrypted / redacted blocks: show labeled placeholder
+                if (type.includes("encrypted") || type.includes("redacted")) {
+                  return (
+                    <p key={i} className="italic opacity-50">
+                      [{type} reasoning block]
+                    </p>
+                  );
+                }
+                if (text) {
+                  return <p key={i}>{text}</p>;
+                }
+              }
+              return null;
+            })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Single Message Bubble ────────────────────────────────────────────────────
 
 function MessageBubble({ msg }: { msg: TranscriptMessage }) {
@@ -90,12 +160,19 @@ function MessageBubble({ msg }: { msg: TranscriptMessage }) {
   const displayText = isLong && !expanded ? text.slice(0, 600) + "…" : text;
   const styleClass = ROLE_STYLE[msg.role] ?? ROLE_STYLE.user;
   const label = ROLE_LABEL[msg.role] ?? msg.role;
+  const showReasoning = msg.role === "assistant";
 
   return (
     <div className={`px-4 py-3 border-b border-[var(--color-border)] ${styleClass}`}>
       <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5 opacity-60">
         {label}
       </p>
+      {showReasoning && (
+        <ReasoningBlock
+          reasoning={msg.reasoning}
+          reasoning_details={msg.reasoning_details}
+        />
+      )}
       <p className="text-sm whitespace-pre-wrap leading-relaxed break-words">{displayText}</p>
       {isLong && (
         <button

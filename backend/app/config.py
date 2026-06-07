@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     allowed_origins: list[str] = ["http://localhost:5173"]
     max_log_body_bytes: int = 1024 * 1024  # 1 MB
 
+    # Logging
+    log_level: str = "INFO"         # DEBUG | INFO | WARNING | ERROR
+    log_file: str = "logs/lsd.log"  # path relative to backend/; empty = no file
+
     # OpenRouter proxy
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
