@@ -111,9 +111,7 @@ class StreamAssembler:
             "".join(self._reasoning_parts) if self._reasoning_parts else None
         )
         reasoning_details: list[dict] | None = (
-            [d for d in self._reasoning_details if d]
-            if self._reasoning_details
-            else None
+            [d for d in self._reasoning_details if d] if self._reasoning_details else None
         )
 
         message: dict[str, Any] = {"role": "assistant"}

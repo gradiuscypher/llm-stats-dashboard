@@ -92,11 +92,12 @@ function CreateKeyForm({ onCreated }: { onCreated: (key: ApiKeyCreatedResponse) 
             ))}
           </div>
         </div>
-        {error && (
-          <p className="text-xs text-[var(--color-danger)]">{error}</p>
-        )}
+        {error && <p className="text-xs text-[var(--color-danger)]">{error}</p>}
         <Button
-          onClick={() => { setError(null); createMutation.mutate(); }}
+          onClick={() => {
+            setError(null);
+            createMutation.mutate();
+          }}
           loading={createMutation.isPending}
           disabled={!name || scopes.length === 0}
           size="sm"
@@ -124,14 +125,9 @@ export function ApiKeysPage() {
 
   return (
     <Layout>
-      <PageHeader
-        title="API Keys"
-        subtitle="Manage keys for programmatic access"
-      />
+      <PageHeader title="API Keys" subtitle="Manage keys for programmatic access" />
 
-      {newKey && (
-        <CreatedKeyBanner raw_key={newKey.raw_key} onDismiss={() => setNewKey(null)} />
-      )}
+      {newKey && <CreatedKeyBanner raw_key={newKey.raw_key} onDismiss={() => setNewKey(null)} />}
 
       <CreateKeyForm onCreated={setNewKey} />
 
@@ -155,7 +151,9 @@ export function ApiKeysPage() {
               {keys.map((key: ApiKeyPublic) => (
                 <tr key={key.id} className={key.revoked_at ? "opacity-40" : ""}>
                   <td>{key.name}</td>
-                  <td><code className="text-xs">{key.prefix}</code></td>
+                  <td>
+                    <code className="text-xs">{key.prefix}</code>
+                  </td>
                   <td>
                     <div className="flex gap-1 flex-wrap">
                       {key.scopes.map((s) => (
@@ -166,9 +164,7 @@ export function ApiKeysPage() {
                     </div>
                   </td>
                   <td className="tabular-nums text-xs muted">
-                    {key.last_used_at
-                      ? new Date(key.last_used_at).toLocaleDateString()
-                      : "Never"}
+                    {key.last_used_at ? new Date(key.last_used_at).toLocaleDateString() : "Never"}
                   </td>
                   <td className="tabular-nums text-xs muted">
                     {new Date(key.created_at).toLocaleDateString()}

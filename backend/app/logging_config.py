@@ -18,8 +18,8 @@ from app.config import settings
 # ── Format ────────────────────────────────────────────────────────────────────
 
 _CONSOLE_FMT = "%(asctime)s %(levelname)-8s %(name)s  %(message)s"
-_FILE_FMT    = "%(asctime)s %(levelname)-8s %(name)s [%(filename)s:%(lineno)d]  %(message)s"
-_DATE_FMT    = "%Y-%m-%d %H:%M:%S"
+_FILE_FMT = "%(asctime)s %(levelname)-8s %(name)s [%(filename)s:%(lineno)d]  %(message)s"
+_DATE_FMT = "%Y-%m-%d %H:%M:%S"
 
 # Loggers we always want at DEBUG regardless of the global level — these are the
 # ones most useful for diagnosing the proxy / auth issues.
@@ -38,7 +38,7 @@ def configure_logging() -> None:
 
     # ── Root logger ───────────────────────────────────────────────────────────
     root = logging.getLogger()
-    root.setLevel(logging.DEBUG)   # let handlers filter; root must be lowest
+    root.setLevel(logging.DEBUG)  # let handlers filter; root must be lowest
 
     # Don't add duplicate handlers if already configured (e.g. during tests)
     if root.handlers:
@@ -56,7 +56,7 @@ def configure_logging() -> None:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         file_handler = logging.handlers.RotatingFileHandler(
             log_path,
-            maxBytes=10 * 1024 * 1024,   # 10 MB per file
+            maxBytes=10 * 1024 * 1024,  # 10 MB per file
             backupCount=5,
             encoding="utf-8",
         )

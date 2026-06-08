@@ -11,6 +11,7 @@ from app.config import settings
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _create_api_key(auth_client, scopes: list[str]) -> str:
     """Create an API key via the API and return the raw key string."""
     csrf = auth_client.get("/api/v1/auth/csrf").json()["csrf_token"]
@@ -42,6 +43,7 @@ def _enable_proxy_config(monkeypatch):
 # Health endpoint
 # ---------------------------------------------------------------------------
 
+
 class TestProxyHealth:
     def test_health_without_key(self, client, monkeypatch):
         """Health endpoint returns degraded when no API key is configured."""
@@ -70,6 +72,7 @@ class TestProxyHealth:
 # Models passthrough
 # ---------------------------------------------------------------------------
 
+
 class TestProxyModels:
     @respx.mock
     def test_models_passthrough(self, client, monkeypatch):
@@ -91,6 +94,7 @@ class TestProxyModels:
 # ---------------------------------------------------------------------------
 # Chat completions — auth
 # ---------------------------------------------------------------------------
+
 
 class TestProxyChatAuth:
     def test_no_auth(self, client):
@@ -121,11 +125,19 @@ class TestProxyChatAuth:
         _enable_proxy_config(monkeypatch)
         raw_key = _create_api_key(auth_client, ["proxy:use"])
         respx.post("https://openrouter.ai/api/v1/chat/completions").mock(
-            return_value=httpx.Response(200, json={
-                "id": "chatcmpl-123",
-                "choices": [{"message": {"role": "assistant", "content": "Hello!"}, "finish_reason": "stop"}],
-                "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
-            })
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "chatcmpl-123",
+                    "choices": [
+                        {
+                            "message": {"role": "assistant", "content": "Hello!"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+                },
+            )
         )
         resp = auth_client.post(
             "/api/v1/chat/completions",
@@ -140,11 +152,19 @@ class TestProxyChatAuth:
         _enable_proxy_config(monkeypatch)
         raw_key = _create_api_key(auth_client, ["proxy:use"])
         respx.post("https://openrouter.ai/api/v1/chat/completions").mock(
-            return_value=httpx.Response(200, json={
-                "id": "chatcmpl-123",
-                "choices": [{"message": {"role": "assistant", "content": "Hello!"}, "finish_reason": "stop"}],
-                "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
-            })
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "chatcmpl-123",
+                    "choices": [
+                        {
+                            "message": {"role": "assistant", "content": "Hello!"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+                },
+            )
         )
         resp = auth_client.post(
             "/api/v1/chat/completions",
@@ -158,6 +178,7 @@ class TestProxyChatAuth:
 # Chat completions — non-stream
 # ---------------------------------------------------------------------------
 
+
 class TestProxyChatNonStream:
     @respx.mock
     def test_successful_proxy(self, auth_client, monkeypatch):
@@ -169,11 +190,13 @@ class TestProxyChatNonStream:
             "id": "chatcmpl-123",
             "object": "chat.completion",
             "model": "gpt-4o",
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": "Hello, world!"},
-                "finish_reason": "stop",
-            }],
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "Hello, world!"},
+                    "finish_reason": "stop",
+                }
+            ],
             "usage": {
                 "prompt_tokens": 10,
                 "completion_tokens": 5,
@@ -239,7 +262,9 @@ class TestProxyChatNonStream:
         large_message = "x" * (1024 * 1024 + 1)
         resp = auth_client.post(
             "/api/v1/chat/completions",
-            data=json.dumps({"model": "gpt-4o", "messages": [{"role": "user", "content": large_message}]}),
+            data=json.dumps(
+                {"model": "gpt-4o", "messages": [{"role": "user", "content": large_message}]}
+            ),
             headers={**_bearer_headers(raw_key), "Content-Type": "application/json"},
         )
         assert resp.status_code == 413
@@ -259,19 +284,21 @@ class TestProxyChatNonStream:
             "id": "chatcmpl-reasoning-1",
             "object": "chat.completion",
             "model": "gpt-4o",
-            "choices": [{
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": "The answer is 4.",
-                    "reasoning": "Let me think: 2+2=4. That's correct.",
-                    "reasoning_details": [
-                        {"type": "reasoning.text", "text": "2+2=4"},
-                        {"type": "reasoning.encrypted", "text": "enc=="},
-                    ],
-                },
-                "finish_reason": "stop",
-            }],
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "The answer is 4.",
+                        "reasoning": "Let me think: 2+2=4. That's correct.",
+                        "reasoning_details": [
+                            {"type": "reasoning.text", "text": "2+2=4"},
+                            {"type": "reasoning.encrypted", "text": "enc=="},
+                        ],
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
             "usage": {
                 "prompt_tokens": 10,
                 "completion_tokens": 12,

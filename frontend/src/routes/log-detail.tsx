@@ -20,7 +20,12 @@ const roleBg: Record<MessageRole, string> = {
   tool: "bg-[var(--color-code-bg)]",
 };
 
-function MessageBlock({ role, content, reasoning, reasoningDetails }: {
+function MessageBlock({
+  role,
+  content,
+  reasoning,
+  reasoningDetails,
+}: {
   role: string;
   content: unknown;
   reasoning?: string;
@@ -32,7 +37,7 @@ function MessageBlock({ role, content, reasoning, reasoningDetails }: {
 
   return (
     <div
-      className={`border-b border-[var(--color-border)] px-4 py-3 ${roleBg[(role as MessageRole)] ?? ""}`}
+      className={`border-b border-[var(--color-border)] px-4 py-3 ${roleBg[role as MessageRole] ?? ""}`}
     >
       <div className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-muted)] mb-1">
         {role}
@@ -79,18 +84,53 @@ export function LogDetailPage({ logId }: LogDetailPageProps) {
     queryFn: () => logsApi.get(logId),
   });
 
-  if (isLoading) return <Layout><p className="text-sm muted">Loading...</p></Layout>;
-  if (!log) return <Layout><p className="text-sm danger">Log not found.</p></Layout>;
+  if (isLoading)
+    return (
+      <Layout>
+        <p className="text-sm muted">Loading...</p>
+      </Layout>
+    );
+  if (!log)
+    return (
+      <Layout>
+        <p className="text-sm danger">Log not found.</p>
+      </Layout>
+    );
 
-  const messages: Array<{ role: string; content: unknown; reasoning?: string; reasoningDetails?: unknown[] }> = [
-    ...((log.request as { messages?: { role: string; content: unknown; reasoning?: string; reasoning_details?: unknown[] }[] }).messages ?? []).map((m) => ({
+  const messages: Array<{
+    role: string;
+    content: unknown;
+    reasoning?: string;
+    reasoningDetails?: unknown[];
+  }> = [
+    ...(
+      (
+        log.request as {
+          messages?: {
+            role: string;
+            content: unknown;
+            reasoning?: string;
+            reasoning_details?: unknown[];
+          }[];
+        }
+      ).messages ?? []
+    ).map((m) => ({
       role: m.role,
       content: m.content,
       reasoning: m.reasoning,
       reasoningDetails: m.reasoning_details,
     })),
   ];
-  const rmsg = (log.response as { message?: { role: string; content: unknown; reasoning?: string; reasoning_details?: unknown[] } }).message;
+  const rmsg = (
+    log.response as {
+      message?: {
+        role: string;
+        content: unknown;
+        reasoning?: string;
+        reasoning_details?: unknown[];
+      };
+    }
+  ).message;
   if (rmsg) {
     messages.push({
       role: rmsg.role ?? "assistant",
@@ -124,7 +164,10 @@ export function LogDetailPage({ logId }: LogDetailPageProps) {
           ["Reasoning tokens", log.reasoning_tokens?.toLocaleString() ?? "0"],
           ["Cost", log.cost_total != null ? `$${log.cost_total.toFixed(6)}` : "—"],
         ].map(([label, value]) => (
-          <div key={String(label)} className="border border-[var(--color-border)] p-3 bg-[var(--color-surface)]">
+          <div
+            key={String(label)}
+            className="border border-[var(--color-border)] p-3 bg-[var(--color-surface)]"
+          >
             <p className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-muted)] mb-1">
               {label}
             </p>

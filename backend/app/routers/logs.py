@@ -131,6 +131,7 @@ def _to_detail_with_db(e: LogEntry, db: Session) -> LogEntryDetail:
 # Ingest
 # ---------------------------------------------------------------------------
 
+
 @router.post("/logs", response_model=LogEntryPublic, status_code=status.HTTP_201_CREATED)
 def ingest_log(
     payload: LogEntryCreate,
@@ -153,6 +154,7 @@ def ingest_log(
             detail="API key missing required scope: logs:write",
         )
     from app.config import settings
+
     content_length = request.headers.get("content-length")
     if content_length and int(content_length) > settings.max_log_body_bytes:
         raise HTTPException(
@@ -168,6 +170,7 @@ def ingest_log(
 # Retrieval — session OR API key with logs:read
 # ---------------------------------------------------------------------------
 
+
 async def _resolve_user(
     request: Request,
     db: Session = Depends(get_session),
@@ -177,8 +180,9 @@ async def _resolve_user(
     if api_key_header and api_key_header.startswith("lsd_"):
         user, api_key = await get_current_user_from_api_key(request, db)
         if "logs:read" not in api_key.scopes:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                                detail="API key missing scope: logs:read")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="API key missing scope: logs:read"
+            )
         return user
     return get_current_user(request, db)
 
@@ -296,9 +300,7 @@ async def list_conversations(
         if provider:
             sub = sub.where(LogEntry.provider == provider)
         matching_ids_subq = sub.distinct().subquery()
-        conditions.append(
-            LogEntry.conversation_id.in_(select(matching_ids_subq.c.conversation_id))
-        )
+        conditions.append(LogEntry.conversation_id.in_(select(matching_ids_subq.c.conversation_id)))
 
     # Aggregate query
     agg = (
@@ -330,17 +332,9 @@ async def list_conversations(
         "call_count": count_subq.c.call_count,
     }
     sort_attr = sort_map[sort_col]
-    if order_dir == "asc":
-        sort_attr = sort_attr.asc()
-    else:
-        sort_attr = sort_attr.desc()
+    sort_attr = sort_attr.asc() if order_dir == "asc" else sort_attr.desc()
 
-    paginated = (
-        select(count_subq)
-        .order_by(sort_attr)
-        .offset(offset)
-        .limit(limit)
-    )
+    paginated = select(count_subq).order_by(sort_attr).offset(offset).limit(limit)
     rows = db.execute(paginated).all()
 
     # Build response
@@ -406,6 +400,7 @@ async def get_conversation(
 # Transcript — deduped contiguous conversation view
 # ---------------------------------------------------------------------------
 
+
 @router.get("/conversations/{conversation_id}/transcript", response_model=TranscriptResponse)
 async def get_transcript(
     conversation_id: str,
@@ -458,8 +453,7 @@ async def get_transcript(
     divider_map = {d.entry_id: d for d in all_dividers}
 
     # Detect branching: if any entry's parent_entry_id forms a non-linear tree,
-    # we have branches.  Build a set of "branch root" entry ids.
-    entry_ids = {e.id for e in entries}
+    # we have branches.
     children: dict[uuid.UUID | None, list[LogEntry]] = {}
     for e in entries:
         children.setdefault(e.parent_entry_id, []).append(e)
@@ -482,9 +476,7 @@ async def get_transcript(
     trunk_entries = _longest_chain(None)
     trunk_entry_ids = {e.id for e in trunk_entries}
 
-    is_branched = any(
-        len(children.get(e.id, [])) > 1 for e in entries
-    )
+    is_branched = any(len(children.get(e.id, [])) > 1 for e in entries)
 
     # Build trunk messages — unique messages in first-seen order.
     seen_ids: set[uuid.UUID] = set()
@@ -526,7 +518,8 @@ async def get_transcript(
 
     # Group branch entries by their divergence root (first entry off-trunk).
     branch_roots: list[LogEntry] = [
-        e for e in branch_entries
+        e
+        for e in branch_entries
         if e.parent_entry_id is None or e.parent_entry_id in trunk_entry_ids
     ]
 

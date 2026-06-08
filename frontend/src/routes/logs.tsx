@@ -60,21 +60,30 @@ export function LogsPage() {
           label="Model"
           placeholder="gpt-4o"
           value={model}
-          onChange={(e) => { setModel(e.target.value); setOffset(0); }}
+          onChange={(e) => {
+            setModel(e.target.value);
+            setOffset(0);
+          }}
           className="w-40"
         />
         <Field
           label="Provider"
           placeholder="openai"
           value={provider}
-          onChange={(e) => { setProvider(e.target.value); setOffset(0); }}
+          onChange={(e) => {
+            setProvider(e.target.value);
+            setOffset(0);
+          }}
           className="w-32"
         />
         <Field
           label="Conversation ID"
           placeholder="session-abc"
           value={conversationId}
-          onChange={(e) => { setConversationId(e.target.value); setOffset(0); }}
+          onChange={(e) => {
+            setConversationId(e.target.value);
+            setOffset(0);
+          }}
           className="w-48"
         />
       </div>
@@ -111,7 +120,9 @@ export function LogsPage() {
                     </td>
                     <td>
                       <span className="text-xs">{log.model}</span>
-                      <span className="ml-1 text-[var(--color-text-faint)] text-xs">{log.provider}</span>
+                      <span className="ml-1 text-[var(--color-text-faint)] text-xs">
+                        {log.provider}
+                      </span>
                     </td>
                     <td>
                       {log.conversation_id ? (
@@ -127,14 +138,16 @@ export function LogsPage() {
                       )}
                     </td>
                     <td>
-                      <span className="text-xs">
-                        {log.api_key_name ?? "Legacy"}
-                      </span>
+                      <span className="text-xs">{log.api_key_name ?? "Legacy"}</span>
                     </td>
                     <td className="tabular-nums">{log.total_tokens.toLocaleString()}</td>
                     <td className="tabular-nums">{fmtCost(log.cost_total)}</td>
-                    <td className="tabular-nums">{log.latency_ms != null ? `${log.latency_ms}ms` : "—"}</td>
-                    <td><StatusBadge status={log.status} /></td>
+                    <td className="tabular-nums">
+                      {log.latency_ms != null ? `${log.latency_ms}ms` : "—"}
+                    </td>
+                    <td>
+                      <StatusBadge status={log.status} />
+                    </td>
                   </tr>
                 ))}
                 {logs.length === 0 && (
@@ -156,11 +169,16 @@ export function LogsPage() {
 
             <select
               value={pageSize}
-              onChange={(e) => { setPageSize(Number(e.target.value)); setOffset(0); }}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value));
+                setOffset(0);
+              }}
               className="text-xs bg-[var(--color-bg-alt)] border border-[var(--color-border)] rounded px-1.5 py-0.5"
             >
               {PAGE_SIZES.map((n) => (
-                <option key={n} value={n}>{n} / page</option>
+                <option key={n} value={n}>
+                  {n} / page
+                </option>
               ))}
             </select>
 

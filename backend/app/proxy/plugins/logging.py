@@ -35,7 +35,8 @@ class LoggingPlugin(BasePlugin):
             # Extract X-Conversation-Id header if present
             conv_id_header = ctx.request_headers.get("x-conversation-id")
             payload = map_to_log_entry(
-                ctx, ctx.response_body,
+                ctx,
+                ctx.response_body,
                 conversation_id_header=conv_id_header,
             )
 

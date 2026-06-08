@@ -89,21 +89,30 @@ export function ConversationsPage() {
           label="Model"
           placeholder="gpt-4o"
           value={model}
-          onChange={(e) => { setModel(e.target.value); setOffset(0); }}
+          onChange={(e) => {
+            setModel(e.target.value);
+            setOffset(0);
+          }}
           className="w-40"
         />
         <Field
           label="Provider"
           placeholder="openai"
           value={provider}
-          onChange={(e) => { setProvider(e.target.value); setOffset(0); }}
+          onChange={(e) => {
+            setProvider(e.target.value);
+            setOffset(0);
+          }}
           className="w-32"
         />
         <Field
           label="Conversation ID"
           placeholder="session-abc"
           value={conversationId}
-          onChange={(e) => { setConversationId(e.target.value); setOffset(0); }}
+          onChange={(e) => {
+            setConversationId(e.target.value);
+            setOffset(0);
+          }}
           className="w-48"
         />
       </div>
@@ -118,8 +127,13 @@ export function ConversationsPage() {
                 <tr>
                   <th>Conversation</th>
                   {SORT_COLUMNS.map(({ col, label }) => (
-                    <th key={col} className="cursor-pointer select-none" onClick={() => toggleSort(col)}>
-                      {label} <span className="text-[var(--color-accent)]">{sortIndicator(col)}</span>
+                    <th
+                      key={col}
+                      className="cursor-pointer select-none"
+                      onClick={() => toggleSort(col)}
+                    >
+                      {label}{" "}
+                      <span className="text-[var(--color-accent)]">{sortIndicator(col)}</span>
                     </th>
                   ))}
                   <th>Models</th>
@@ -139,9 +153,7 @@ export function ConversationsPage() {
                         {row.conversation_id}
                       </Link>
                     </td>
-                    <td className="tabular-nums whitespace-nowrap">
-                      {fmtDate(row.last_activity)}
-                    </td>
+                    <td className="tabular-nums whitespace-nowrap">{fmtDate(row.last_activity)}</td>
                     <td className="tabular-nums">{row.total_tokens.toLocaleString()}</td>
                     <td className="tabular-nums">{fmtCost(row.total_cost)}</td>
                     <td className="tabular-nums">{row.call_count}</td>
@@ -181,11 +193,16 @@ export function ConversationsPage() {
 
             <select
               value={pageSize}
-              onChange={(e) => { setPageSize(Number(e.target.value)); setOffset(0); }}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value));
+                setOffset(0);
+              }}
               className="text-xs bg-[var(--color-bg-alt)] border border-[var(--color-border)] rounded px-1.5 py-0.5"
             >
               {PAGE_SIZES.map((n) => (
-                <option key={n} value={n}>{n} / page</option>
+                <option key={n} value={n}>
+                  {n} / page
+                </option>
               ))}
             </select>
 

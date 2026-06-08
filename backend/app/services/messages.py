@@ -23,6 +23,7 @@ from app.models.message import Message
 # Hashing
 # ---------------------------------------------------------------------------
 
+
 def _canonical_json(obj: dict) -> str:
     """Deterministic JSON for a message dict — used as the hash input."""
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
@@ -36,6 +37,7 @@ def content_hash(message: dict) -> str:
 # ---------------------------------------------------------------------------
 # Interning
 # ---------------------------------------------------------------------------
+
 
 def intern_messages(
     messages: list[dict],
@@ -100,6 +102,7 @@ def intern_messages(
 # Rehydration
 # ---------------------------------------------------------------------------
 
+
 def rehydrate_messages(
     message_ids: list[uuid.UUID],
     db: Session,
@@ -146,6 +149,7 @@ def batch_rehydrate_messages(
 # ---------------------------------------------------------------------------
 # Parent entry resolution
 # ---------------------------------------------------------------------------
+
 
 def resolve_parent_entry_id(
     message_ids: list[uuid.UUID],

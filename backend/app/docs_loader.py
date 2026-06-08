@@ -14,10 +14,12 @@ def list_docs() -> list[dict]:
     results = []
     for md_file in sorted(DOCS_DIR.rglob("*.md")):
         rel = md_file.relative_to(DOCS_DIR)
-        results.append({
-            "path": str(rel).replace("\\", "/"),
-            "title": md_file.stem.replace("-", " ").replace("_", " ").title(),
-        })
+        results.append(
+            {
+                "path": str(rel).replace("\\", "/"),
+                "title": md_file.stem.replace("-", " ").replace("_", " ").title(),
+            }
+        )
     return results
 
 

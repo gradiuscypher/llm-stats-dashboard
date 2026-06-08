@@ -25,9 +25,16 @@ def _build_upstream_headers(extra: dict | None = None) -> dict:
 def _strip_hop_by_hop(headers: dict) -> dict:
     """Remove hop-by-hop and auth headers from upstream response headers."""
     hop_by_hop = {
-        "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
-        "te", "trailers", "transfer-encoding", "upgrade",
-        "authorization", "x-api-key",
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailers",
+        "transfer-encoding",
+        "upgrade",
+        "authorization",
+        "x-api-key",
     }
     return {k: v for k, v in headers.items() if k.lower() not in hop_by_hop}
 
@@ -59,7 +66,7 @@ async def forward_stream(
     """
     url = f"{settings.openrouter_base_url}{path}"
     headers = _build_upstream_headers(extra_upstream_headers)
-    async with (
+    async with (  # noqa: SIM117
         httpx.AsyncClient(timeout=settings.proxy_upstream_timeout_s) as client,
     ):
         async with client.stream("POST", url, json=body, headers=headers) as response:
@@ -74,6 +81,7 @@ async def forward_stream(
                     continue
                 try:
                     import json
+
                     yield json.loads(data_str), None
                 except json.JSONDecodeError:
                     yield None, (line + "\n").encode()

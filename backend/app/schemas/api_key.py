@@ -46,4 +46,5 @@ class ApiKeyPublic(BaseModel):
 
 class ApiKeyCreatedResponse(ApiKeyPublic):
     """Returned once on creation. raw_key is not stored and cannot be retrieved again."""
+
     raw_key: str

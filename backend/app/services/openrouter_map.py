@@ -76,11 +76,13 @@ def _extract_tool_calls(choice: dict) -> list[dict]:
                 args = {}
         else:
             args = raw_args if isinstance(raw_args, dict) else {}
-        result.append({
-            "id": tc.get("id"),
-            "name": func.get("name", ""),
-            "arguments": args,
-        })
+        result.append(
+            {
+                "id": tc.get("id"),
+                "name": func.get("name", ""),
+                "arguments": args,
+            }
+        )
     return result
 
 
@@ -175,10 +177,7 @@ def map_to_log_entry(
     model = ctx.model
 
     # ---- Request ----
-    messages = [
-        _to_canonical_message(m)
-        for m in request_body.get("messages", [])
-    ]
+    messages = [_to_canonical_message(m) for m in request_body.get("messages", [])]
     params = {k: v for k, v in request_body.items() if k not in ("messages", "model")}
     request = RequestPayload(messages=messages, params=params)
 
@@ -212,6 +211,7 @@ def map_to_log_entry(
     cost_from_usage = usage.get("cost")
     if cost_from_usage is not None:
         from app.schemas.log_entry import CostPayload
+
         cost = CostPayload(total=cost_from_usage, currency="USD")
 
     # ---- Conversation ID ----
@@ -254,10 +254,7 @@ def map_error_to_log_entry(
     request_body = ctx.request_body
     model = ctx.model
 
-    messages = [
-        _to_canonical_message(m)
-        for m in request_body.get("messages", [])
-    ]
+    messages = [_to_canonical_message(m) for m in request_body.get("messages", [])]
     params = {k: v for k, v in request_body.items() if k not in ("messages", "model")}
     request = RequestPayload(messages=messages, params=params)
 

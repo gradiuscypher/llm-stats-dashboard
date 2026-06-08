@@ -4,14 +4,7 @@ import { logsApi } from "@/lib/api";
 import { Layout } from "@/components/Layout";
 import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-} from "recharts";
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
 function fmtCost(v: number | null) {
   if (v == null) return "—";
@@ -30,10 +23,7 @@ export function DashboardPage() {
 
   return (
     <Layout>
-      <PageHeader
-        title="Dashboard"
-        subtitle="Last 30 days"
-      />
+      <PageHeader title="Dashboard" subtitle="Last 30 days" />
 
       {isLoading ? (
         <p className="text-sm text-[var(--color-text-muted)]">Loading...</p>
@@ -43,20 +33,9 @@ export function DashboardPage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
             <StatCard label="Total Calls" value={fmtNum(stats?.total_calls ?? 0)} />
             <StatCard label="Total Tokens" value={fmtNum(stats?.total_tokens ?? 0)} />
-            <StatCard
-              label="Reasoning Tokens"
-              value={fmtNum(stats?.total_reasoning_tokens ?? 0)}
-            />
-            <StatCard
-              label="Total Cost"
-              value={fmtCost(stats?.total_cost ?? null)}
-              sub="USD"
-            />
-            <StatCard
-              label="Models"
-              value={stats?.by_model.length ?? 0}
-              sub="distinct"
-            />
+            <StatCard label="Reasoning Tokens" value={fmtNum(stats?.total_reasoning_tokens ?? 0)} />
+            <StatCard label="Total Cost" value={fmtCost(stats?.total_cost ?? null)} sub="USD" />
+            <StatCard label="Models" value={stats?.by_model.length ?? 0} sub="distinct" />
           </div>
 
           {/* Calls per day chart */}
@@ -118,7 +97,11 @@ export function DashboardPage() {
                     <td>
                       <Link
                         to="/logs"
-                        search={{ model: row.model }}
+                        search={{
+                          model: row.model,
+                          provider: undefined,
+                          conversation_id: undefined,
+                        }}
                         className="no-underline hover:underline"
                       >
                         {row.model}

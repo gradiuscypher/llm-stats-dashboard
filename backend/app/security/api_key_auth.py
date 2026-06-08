@@ -104,6 +104,7 @@ async def get_current_user_from_api_key(
 
 def require_scope(scope: str) -> Callable:
     """Returns a FastAPI dependency that enforces a specific scope on an API key."""
+
     async def dependency(
         auth: tuple[User, ApiKey] = Depends(get_current_user_from_api_key),
     ) -> User:
@@ -114,4 +115,5 @@ def require_scope(scope: str) -> Callable:
                 detail=f"API key missing required scope: {scope}",
             )
         return user
+
     return dependency

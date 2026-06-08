@@ -11,6 +11,7 @@ The chat/completions and completions endpoints flow through the plugin pipeline.
 
 import json
 import logging
+from collections.abc import AsyncGenerator
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
@@ -39,6 +40,7 @@ router = APIRouter(tags=["proxy"])
 # Pipeline factory (lazy singleton)
 # ---------------------------------------------------------------------------
 
+
 def _build_pipeline() -> PluginPipeline:
     return PluginPipeline(get_pipeline())
 
@@ -47,8 +49,9 @@ def _build_pipeline() -> PluginPipeline:
 # Health — proxy-specific readiness
 # ---------------------------------------------------------------------------
 
+
 @router.get("/proxy/health")
-async def proxy_health():
+async def proxy_health() -> dict:
     """Return proxy readiness: upstream reachable, key configured."""
     problems: list[str] = []
 
@@ -83,8 +86,9 @@ async def proxy_health():
 # Models — transparent passthrough
 # ---------------------------------------------------------------------------
 
+
 @router.get("/models")
-async def proxy_models():
+async def proxy_models() -> JSONResponse:
     """Proxy OpenRouter's model list."""
     if not settings.openrouter_api_key:
         raise HTTPException(
@@ -104,14 +108,15 @@ async def proxy_models():
                 headers=_strip_hop_by_hop(dict(resp.headers)),
             )
     except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=e.response.status_code, detail=str(e))
+        raise HTTPException(status_code=e.response.status_code, detail=str(e)) from e
     except httpx.RequestError as e:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
 
 
 # ---------------------------------------------------------------------------
 # Auth helper for proxy routes: validates proxy:use scope
 # ---------------------------------------------------------------------------
+
 
 async def _proxy_auth(
     auth: tuple[User, ApiKeyModel] = Depends(get_current_user_from_api_key),
@@ -130,6 +135,7 @@ async def _proxy_auth(
 # Shared: build ProxyContext from incoming request
 # ---------------------------------------------------------------------------
 
+
 async def _build_context(request: Request, user: User, api_key: ApiKeyModel) -> ProxyContext:
     """Parse the incoming request body and build a ProxyContext."""
     # Read body once
@@ -143,7 +149,10 @@ async def _build_context(request: Request, user: User, api_key: ApiKeyModel) -> 
     try:
         request_body = json.loads(body_bytes)
     except json.JSONDecodeError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON body")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid JSON body",
+        ) from None
 
     is_stream = request_body.get("stream", False) is True
     model = request_body.get("model", "unknown")
@@ -162,6 +171,7 @@ async def _build_context(request: Request, user: User, api_key: ApiKeyModel) -> 
 # Non-stream handler
 # ---------------------------------------------------------------------------
 
+
 async def _handle_non_stream(
     ctx: ProxyContext,
     pipeline: PluginPipeline,
@@ -175,10 +185,10 @@ async def _handle_non_stream(
         upstream_response = await forward_non_stream(path, body)
     except httpx.HTTPStatusError as e:
         await pipeline.on_error(ctx, e)
-        raise HTTPException(status_code=e.response.status_code, detail=str(e))
+        raise HTTPException(status_code=e.response.status_code, detail=str(e)) from e
     except httpx.RequestError as e:
         await pipeline.on_error(ctx, e)
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
 
     # Populate context
     ctx.response_body = upstream_response
@@ -194,6 +204,7 @@ async def _handle_non_stream(
 # ---------------------------------------------------------------------------
 # Stream handler
 # ---------------------------------------------------------------------------
+
 
 async def _handle_stream(
     ctx: ProxyContext,
@@ -211,7 +222,7 @@ async def _handle_stream(
 
     assembler = pipeline.start_stream(ctx)
 
-    async def sse_generator():
+    async def sse_generator() -> AsyncGenerator[bytes, None]:
         try:
             async for parsed, raw_bytes in forward_stream(path, body):
                 if parsed is not None:
@@ -265,12 +276,13 @@ async def _handle_stream(
 # POST /chat/completions
 # ---------------------------------------------------------------------------
 
-@router.post("/chat/completions")
+
+@router.post("/chat/completions", response_model=None)
 async def proxy_chat_completions(
     request: Request,
     background_tasks: BackgroundTasks,
     auth: tuple[User, ApiKeyModel] = Depends(_proxy_auth),
-):
+) -> StreamingResponse | JSONResponse:
     """Proxy a chat completion to OpenRouter.
 
     Supports both stream (SSE) and non-stream modes transparently.
@@ -291,7 +303,7 @@ async def proxy_chat_completions(
         upstream_response = await _handle_non_stream(ctx, pipeline)
 
         # Logging fire-and-forget after response is returned to client
-        async def log_after():
+        async def log_after() -> None:
             try:
                 await pipeline.on_response(ctx)
             except Exception:
@@ -305,12 +317,13 @@ async def proxy_chat_completions(
 # POST /completions (legacy text completions)
 # ---------------------------------------------------------------------------
 
-@router.post("/completions")
+
+@router.post("/completions", response_model=None)
 async def proxy_completions(
     request: Request,
     background_tasks: BackgroundTasks,
     auth: tuple[User, ApiKeyModel] = Depends(_proxy_auth),
-):
+) -> StreamingResponse | JSONResponse:
     """Proxy a text completion to OpenRouter."""
     if not settings.openrouter_api_key:
         raise HTTPException(
@@ -327,7 +340,7 @@ async def proxy_completions(
     else:
         upstream_response = await _handle_non_stream(ctx, pipeline, path="/completions")
 
-        async def log_after():
+        async def log_after() -> None:
             try:
                 await pipeline.on_response(ctx)
             except Exception:

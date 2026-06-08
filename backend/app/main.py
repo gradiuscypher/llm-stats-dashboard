@@ -4,18 +4,18 @@ from app.logging_config import configure_logging
 
 configure_logging()
 
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
-from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
-from starlette.responses import Response as StarletteResponse
+import logging  # noqa: E402
 
-import logging
+from fastapi import FastAPI, Request  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+from slowapi import Limiter, _rate_limit_exceeded_handler  # noqa: E402
+from slowapi.errors import RateLimitExceeded  # noqa: E402
+from slowapi.util import get_remote_address  # noqa: E402
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint  # noqa: E402
+from starlette.responses import Response as StarletteResponse  # noqa: E402
 
-from app.config import settings
-from app.routers import api_keys, auth, docs_router, health, logs, proxy, users
+from app.config import settings  # noqa: E402
+from app.routers import api_keys, auth, docs_router, health, logs, proxy, users  # noqa: E402
 
 request_logger = logging.getLogger("app.requests")
 
@@ -23,6 +23,7 @@ request_logger = logging.getLogger("app.requests")
 # Rate limiter
 # ---------------------------------------------------------------------------
 limiter = Limiter(key_func=get_remote_address)
+
 
 # ---------------------------------------------------------------------------
 # Request logging middleware
@@ -34,12 +35,12 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         # Log auth headers at DEBUG so they're visible when diagnosing 401s.
         # We redact the key value but show which header was used + key prefix.
         auth_header = request.headers.get("authorization", "")
-        x_api_key   = request.headers.get("x-api-key", "")
+        x_api_key = request.headers.get("x-api-key", "")
         if auth_header:
             # Show scheme + first 20 chars of credential only
             parts = auth_header.split(" ", 1)
             scheme = parts[0]
-            cred   = parts[1][:20] + "..." if len(parts) > 1 else ""
+            cred = parts[1][:20] + "..." if len(parts) > 1 else ""
             auth_display = f"{scheme} {cred}"
         elif x_api_key:
             auth_display = f"X-API-Key {x_api_key[:20]}..."

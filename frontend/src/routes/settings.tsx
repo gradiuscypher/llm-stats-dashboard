@@ -58,9 +58,9 @@ function Section({
 // ─── Settings page ───────────────────────────────────────────────────────────
 
 const THEME_OPTIONS: { value: ThemePreference; label: string; description: string }[] = [
-  { value: "system", label: "System",  description: "Follow OS preference" },
-  { value: "light",  label: "Light",   description: "Always light" },
-  { value: "dark",   label: "Dark",    description: "Always dark" },
+  { value: "system", label: "System", description: "Follow OS preference" },
+  { value: "light", label: "Light", description: "Always light" },
+  { value: "dark", label: "Dark", description: "Always dark" },
 ];
 
 const FONT_SIZE_OPTIONS: { value: FontSizePreference }[] = [
@@ -85,10 +85,7 @@ export function SettingsPage() {
         <div className="flex gap-2 flex-wrap">
           {THEME_OPTIONS.map((opt) => (
             <div key={opt.value} className="flex flex-col gap-1">
-              <OptionButton
-                active={theme === opt.value}
-                onClick={() => setTheme(opt.value)}
-              >
+              <OptionButton active={theme === opt.value} onClick={() => setTheme(opt.value)}>
                 {opt.label}
               </OptionButton>
               <span className="text-xs text-[var(--color-text-faint)] ml-0.5">
@@ -107,10 +104,7 @@ export function SettingsPage() {
         <div className="flex gap-2 flex-wrap items-end">
           {FONT_SIZE_OPTIONS.map((opt) => (
             <div key={opt.value} className="flex flex-col gap-1">
-              <OptionButton
-                active={fontSize === opt.value}
-                onClick={() => setFontSize(opt.value)}
-              >
+              <OptionButton active={fontSize === opt.value} onClick={() => setFontSize(opt.value)}>
                 {opt.value}
               </OptionButton>
               <span className="text-xs text-[var(--color-text-faint)] ml-0.5">

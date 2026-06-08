@@ -1,9 +1,10 @@
 """API integration tests for auth endpoints."""
 
 
-
 def test_login_success(client, test_user):
-    resp = client.post("/api/v1/auth/login", json={"username": "testuser", "password": "testpass123"})
+    resp = client.post(
+        "/api/v1/auth/login", json={"username": "testuser", "password": "testpass123"}
+    )
     assert resp.status_code == 200
     assert "lsd_session" in resp.cookies
     assert "lsd_csrf" in resp.cookies

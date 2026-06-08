@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     max_log_body_bytes: int = 1024 * 1024  # 1 MB
 
     # Logging
-    log_level: str = "INFO"         # DEBUG | INFO | WARNING | ERROR
+    log_level: str = "INFO"  # DEBUG | INFO | WARNING | ERROR
     log_file: str = "logs/lsd.log"  # path relative to backend/; empty = no file
 
     # OpenRouter proxy

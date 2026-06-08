@@ -21,14 +21,14 @@ class ProxyContext:
     api_key: ApiKey
 
     # Request (populated by the router from the incoming call)
-    request_body: dict          # parsed JSON body (mutable by plugins)
+    request_body: dict  # parsed JSON body (mutable by plugins)
     request_headers: dict
     model: str
     is_stream: bool
     started_at: float = field(default_factory=time.time)
 
     # Response (populated as we go)
-    response_body: dict | None = None       # assembled (non-stream or end-of-stream)
+    response_body: dict | None = None  # assembled (non-stream or end-of-stream)
     response_headers: dict | None = None
     status_code: int | None = None
     finish_reason: str | None = None

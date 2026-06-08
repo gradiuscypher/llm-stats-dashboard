@@ -13,8 +13,7 @@ export function RegisterPage() {
   const registerMutation = useMutation({
     mutationFn: () => usersApi.register(form),
     onSuccess: () => void router.navigate({ to: "/login" }),
-    onError: (err) =>
-      setError(err instanceof ApiError ? err.detail : "Registration failed"),
+    onError: (err) => setError(err instanceof ApiError ? err.detail : "Registration failed"),
   });
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>

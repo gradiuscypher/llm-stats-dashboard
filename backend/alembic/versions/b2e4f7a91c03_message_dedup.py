@@ -38,6 +38,7 @@ depends_on: str | Sequence[str] | None = None
 # Helpers (pure Python — no SQLModel imports so migration is self-contained)
 # ---------------------------------------------------------------------------
 
+
 def _canonical_json(obj: dict) -> str:
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
@@ -49,6 +50,7 @@ def _content_hash(message: dict) -> str:
 # ---------------------------------------------------------------------------
 # Upgrade
 # ---------------------------------------------------------------------------
+
 
 def upgrade() -> None:
     # 1. Create messages table ------------------------------------------------
@@ -106,8 +108,7 @@ def upgrade() -> None:
 
     # Fetch all existing entries that have messages in their request blob.
     raw.execute(
-        "SELECT id, user_id, conversation_id, request "
-        "FROM log_entries ORDER BY created_at ASC"
+        "SELECT id, user_id, conversation_id, request FROM log_entries ORDER BY created_at ASC"
     )
     rows = raw.fetchall()
     col_names = [desc[0] for desc in raw.description]
@@ -117,7 +118,7 @@ def upgrade() -> None:
     conv_history: dict[str, list[tuple[str, list[str]]]] = {}
 
     for row in rows:
-        r = dict(zip(col_names, row))
+        r = dict(zip(col_names, row, strict=False))
         entry_id = str(r["id"])
         user_id = str(r["user_id"])
         conv_id = r["conversation_id"]
@@ -187,20 +188,20 @@ def upgrade() -> None:
 # Downgrade
 # ---------------------------------------------------------------------------
 
+
 def downgrade() -> None:
     conn = op.get_bind()
     raw = conn.connection.cursor()
 
     # Re-inline messages into each entry's request blob
     raw.execute(
-        "SELECT id, request, message_ids "
-        "FROM log_entries WHERE array_length(message_ids, 1) > 0"
+        "SELECT id, request, message_ids FROM log_entries WHERE array_length(message_ids, 1) > 0"
     )
     rows = raw.fetchall()
     col_names = [desc[0] for desc in raw.description]
 
     for row in rows:
-        r = dict(zip(col_names, row))
+        r = dict(zip(col_names, row, strict=False))
         entry_id = str(r["id"])
         request: dict = r["request"] if isinstance(r["request"], dict) else json.loads(r["request"])
         msg_ids: list[str] = [str(mid) for mid in r["message_ids"]] if r["message_ids"] else []
@@ -216,15 +217,10 @@ def downgrade() -> None:
         )
         msg_rows = raw.fetchall()
         id_to_content = {
-            str(mr[0]): mr[1] if isinstance(mr[1], dict) else json.loads(mr[1])
-            for mr in msg_rows
+            str(mr[0]): mr[1] if isinstance(mr[1], dict) else json.loads(mr[1]) for mr in msg_rows
         }
 
-        messages = [
-            id_to_content[mid]
-            for mid in msg_ids
-            if mid in id_to_content
-        ]
+        messages = [id_to_content[mid] for mid in msg_ids if mid in id_to_content]
 
         request["messages"] = messages
         raw.execute(

@@ -3,21 +3,24 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="LLM Stats Dashboard — track LLM usage, token counts, and costs" />
+    <meta
+      name="description"
+      content="LLM Stats Dashboard — track LLM usage, token counts, and costs"
+    />
     <title>LLM Stats Dashboard</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <!-- Apply saved theme + font size before first paint to prevent flash -->
     <script>
-      (function(){
-        try{
-          var p=localStorage.getItem('lsd-theme');
-          if(p==='light'||p==='dark')document.documentElement.setAttribute('data-theme',p);
-        }catch(e){}
-        try{
-          var map={small:'13px',medium:'15px',large:'17px'};
-          var f=localStorage.getItem('lsd-font-size');
-          if(f&&map[f])document.documentElement.style.setProperty('--font-size-base',map[f]);
-        }catch(e){}
+      (function () {
+        try {
+          var p = localStorage.getItem("lsd-theme");
+          if (p === "light" || p === "dark") document.documentElement.setAttribute("data-theme", p);
+        } catch (e) {}
+        try {
+          var map = { small: "13px", medium: "15px", large: "17px" };
+          var f = localStorage.getItem("lsd-font-size");
+          if (f && map[f]) document.documentElement.style.setProperty("--font-size-base", map[f]);
+        } catch (e) {}
       })();
     </script>
   </head>

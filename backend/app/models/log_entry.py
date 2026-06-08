@@ -3,9 +3,9 @@
 import uuid
 from datetime import datetime
 
+from sqlalchemy import UUID as SA_UUID
 from sqlalchemy import Index
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
-from sqlalchemy import UUID as SA_UUID
 from sqlmodel import Column, Field, SQLModel
 
 
@@ -38,7 +38,9 @@ class LogEntry(SQLModel, table=True):
     # The log entry whose message_ids is the longest prefix of this entry's message_ids.
     # None for the first call in a conversation or when the parent can't be determined.
     # Used to reconstruct the conversation tree (branching / retry detection).
-    parent_entry_id: uuid.UUID | None = Field(default=None, foreign_key="log_entries.id", index=True)
+    parent_entry_id: uuid.UUID | None = Field(
+        default=None, foreign_key="log_entries.id", index=True
+    )
 
     # Provider / model
     provider: str = Field(max_length=64)

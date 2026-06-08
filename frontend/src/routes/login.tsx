@@ -32,9 +32,7 @@ export function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-[var(--color-bg)]">
       <div className="w-full max-w-sm border border-[var(--color-border-strong)] p-8 bg-[var(--color-surface)]">
-        <h1 className="text-base font-bold uppercase tracking-widest mb-1">
-          LLM Stats Dashboard
-        </h1>
+        <h1 className="text-base font-bold uppercase tracking-widest mb-1">LLM Stats Dashboard</h1>
         <p className="text-xs text-[var(--color-text-muted)] mb-6">Sign in to continue.</p>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">

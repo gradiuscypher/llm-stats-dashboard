@@ -1,14 +1,10 @@
 """API integration tests for log ingest and retrieval."""
 
-
-
 _VALID_LOG = {
     "provider": "openai",
     "model": "gpt-4o",
     "conversation_id": "test-conv-001",
-    "request": {
-        "messages": [{"role": "user", "content": "What is 2+2?"}]
-    },
+    "request": {"messages": [{"role": "user", "content": "What is 2+2?"}]},
     "response": {
         "message": {"role": "assistant", "content": "4"},
         "finish_reason": "stop",
@@ -62,7 +58,9 @@ def test_ingest_success(auth_client):
 def test_list_logs(auth_client):
     write_key = _create_api_key(auth_client, ["logs:write"])
     # Ingest within this test so it's independent
-    ingest_resp = auth_client.post("/api/v1/logs", json=_VALID_LOG, headers={"x-api-key": write_key})
+    ingest_resp = auth_client.post(
+        "/api/v1/logs", json=_VALID_LOG, headers={"x-api-key": write_key}
+    )
     assert ingest_resp.status_code == 201
 
     resp = auth_client.get("/api/v1/logs")
@@ -269,6 +267,7 @@ def test_list_conversations_sort(auth_client):
 # Transcript trailing‑reply tests
 # ---------------------------------------------------------------------------
 
+
 def _ingest(auth_client, write_key: str, **overrides) -> dict:
     """Ingest a log entry with defaults and return the parsed JSON."""
     payload = {**_VALID_LOG, **overrides}
@@ -281,11 +280,19 @@ def test_transcript_single_call_ends_with_response(auth_client):
     """A single‑call conversation transcript ends with the assistant reply."""
     wk = _create_api_key(auth_client, ["logs:write"])
     _ingest(
-        auth_client, wk,
+        auth_client,
+        wk,
         conversation_id="tc-trailing",
-        request={"messages": [{"role": "system", "content": "Be helpful"},
-                              {"role": "user", "content": "Hi"}]},
-        response={"message": {"role": "assistant", "content": "Hello there!"}, "finish_reason": "stop"},
+        request={
+            "messages": [
+                {"role": "system", "content": "Be helpful"},
+                {"role": "user", "content": "Hi"},
+            ]
+        },
+        response={
+            "message": {"role": "assistant", "content": "Hello there!"},
+            "finish_reason": "stop",
+        },
     )
 
     t = auth_client.get("/api/v1/conversations/tc-trailing/transcript").json()
@@ -303,20 +310,24 @@ def test_transcript_multi_turn_ends_with_last_response(auth_client):
 
     # Turn 1
     _ingest(
-        auth_client, wk,
+        auth_client,
+        wk,
         conversation_id="tc-two-turn",
         request={"messages": [{"role": "user", "content": "Q1"}]},
         response={"message": {"role": "assistant", "content": "A1"}, "finish_reason": "stop"},
     )
     # Turn 2 — the request includes Turn 1's reply as history.
     _ingest(
-        auth_client, wk,
+        auth_client,
+        wk,
         conversation_id="tc-two-turn",
-        request={"messages": [
-            {"role": "user", "content": "Q1"},
-            {"role": "assistant", "content": "A1"},
-            {"role": "user", "content": "Q2"},
-        ]},
+        request={
+            "messages": [
+                {"role": "user", "content": "Q1"},
+                {"role": "assistant", "content": "A1"},
+                {"role": "user", "content": "Q2"},
+            ]
+        },
         response={"message": {"role": "assistant", "content": "A2"}, "finish_reason": "stop"},
     )
 
@@ -335,7 +346,8 @@ def test_transcript_error_entry_skips_trailing_reply(auth_client):
     """Error entries have empty response content → no trailing reply."""
     wk = _create_api_key(auth_client, ["logs:write"])
     _ingest(
-        auth_client, wk,
+        auth_client,
+        wk,
         conversation_id="tc-error",
         request={"messages": [{"role": "user", "content": "crash"}]},
         response={"message": {"role": "assistant", "content": ""}, "finish_reason": None},
@@ -353,7 +365,8 @@ def test_transcript_empty_response_content_skipped(auth_client):
     """Response with message.content = "" → no trailing reply."""
     wk = _create_api_key(auth_client, ["logs:write"])
     _ingest(
-        auth_client, wk,
+        auth_client,
+        wk,
         conversation_id="tc-empty",
         request={"messages": [{"role": "user", "content": "test"}]},
         # Content is an empty string (e.g. error / tool‑only response).

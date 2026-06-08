@@ -2,14 +2,14 @@ import { useTheme, ThemePreference } from "@/lib/useTheme";
 
 const LABELS: Record<ThemePreference, string> = {
   system: "SYS",
-  light:  "LGT",
-  dark:   "DRK",
+  light: "LGT",
+  dark: "DRK",
 };
 
 const TITLES: Record<ThemePreference, string> = {
   system: "Theme: following system — click for light",
-  light:  "Theme: light — click for dark",
-  dark:   "Theme: dark — click for system",
+  light: "Theme: light — click for dark",
+  dark: "Theme: dark — click for system",
 };
 
 export function ThemeToggle() {

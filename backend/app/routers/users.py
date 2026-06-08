@@ -18,6 +18,7 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 def _get_csrf_secret(request: Request, db: Session) -> str | None:
     from app.security.sessions import SESSION_COOKIE
+
     raw_sid = request.cookies.get(SESSION_COOKIE)
     if not raw_sid:
         return None
@@ -73,11 +74,14 @@ def update_me(
 
     if payload.password is not None:
         if len(payload.password) < 8:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                                detail="Password must be at least 8 characters")
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Password must be at least 8 characters",
+            )
         current_user.password_hash = hash_password(payload.password)
 
     from datetime import datetime
+
     current_user.updated_at = datetime.utcnow()
     db.add(current_user)
     db.commit()

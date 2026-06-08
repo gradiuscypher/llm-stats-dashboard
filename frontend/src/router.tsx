@@ -63,7 +63,8 @@ const logsRoute = createRoute({
   validateSearch: (search: Record<string, unknown>) => ({
     model: typeof search.model === "string" ? search.model : undefined,
     provider: typeof search.provider === "string" ? search.provider : undefined,
-    conversation_id: typeof search.conversation_id === "string" ? search.conversation_id : undefined,
+    conversation_id:
+      typeof search.conversation_id === "string" ? search.conversation_id : undefined,
   }),
 });
 

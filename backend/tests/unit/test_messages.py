@@ -23,6 +23,7 @@ from app.services.messages import (
 # Fixtures — piggyback on the Postgres engine from tests/conftest.py
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(name="db")
 def db_fixture(pg_session):
     """Expose pg_session as 'db' for readability in these tests."""
@@ -34,6 +35,7 @@ def db_user_id_fixture(db) -> uuid.UUID:
     """Insert a real user row and return its id — satisfies messages.user_id FK."""
     from app.models.user import User
     from app.security.passwords import hash_password
+
     uid = uuid.uuid4()
     user = User(id=uid, username=f"u_{uid.hex[:8]}", password_hash=hash_password("x"))
     db.add(user)
@@ -50,6 +52,7 @@ def user_id_fixture() -> uuid.UUID:
 # ---------------------------------------------------------------------------
 # content_hash
 # ---------------------------------------------------------------------------
+
 
 def test_hash_is_stable():
     msg = {"role": "user", "content": "hello"}
@@ -78,6 +81,7 @@ def test_hash_stable_when_no_reasoning_present():
     assert expected == content_hash(msg)
     # Round-trip through CanonicalMessage with exclude_none
     from app.schemas.log_entry import CanonicalMessage
+
     cm = CanonicalMessage(role="user", content="hello")
     assert content_hash(cm.model_dump(exclude_none=True)) == expected
 
@@ -91,11 +95,13 @@ def test_hash_differs_when_reasoning_differs():
 
 def test_hash_differs_when_reasoning_details_differs():
     msg1 = {
-        "role": "assistant", "content": "X",
+        "role": "assistant",
+        "content": "X",
         "reasoning_details": [{"type": "reasoning.text", "text": "A"}],
     }
     msg2 = {
-        "role": "assistant", "content": "X",
+        "role": "assistant",
+        "content": "X",
         "reasoning_details": [{"type": "reasoning.text", "text": "B"}],
     }
     assert content_hash(msg1) != content_hash(msg2)
@@ -104,6 +110,7 @@ def test_hash_differs_when_reasoning_details_differs():
 # ---------------------------------------------------------------------------
 # intern_messages — deduplication
 # ---------------------------------------------------------------------------
+
 
 def test_intern_returns_ids_in_order(db, db_user_id):
     msgs = [
@@ -125,6 +132,7 @@ def test_intern_same_message_same_id(db, db_user_id):
 def test_intern_deduplicates_within_call(db, db_user_id):
     """If a single call sends the same message twice, they share one row."""
     from sqlmodel import select
+
     msg = {"role": "user", "content": "dup"}
     ids = intern_messages([msg, msg], db_user_id, db)
     assert ids[0] == ids[1], "Duplicate messages in one call must map to same id"
@@ -136,6 +144,7 @@ def test_intern_user_isolation(db):
     """Same message content under different users must produce different rows."""
     from app.models.user import User
     from app.security.passwords import hash_password
+
     uid_a, uid_b = uuid.uuid4(), uuid.uuid4()
     for uid, name in [(uid_a, "iso_a"), (uid_b, "iso_b")]:
         db.add(User(id=uid, username=name, password_hash=hash_password("x")))
@@ -149,6 +158,7 @@ def test_intern_user_isolation(db):
 def test_intern_grows_history_correctly(db, db_user_id):
     """Simulates multi-turn: call 2 re-sends call 1's messages + new ones."""
     from sqlmodel import select
+
     turn1 = [{"role": "user", "content": "Hi"}, {"role": "assistant", "content": "Hello"}]
     turn2 = turn1 + [{"role": "user", "content": "How are you?"}]
 
@@ -170,6 +180,7 @@ def test_intern_empty_list(db, db_user_id):
 # ---------------------------------------------------------------------------
 # rehydrate_messages
 # ---------------------------------------------------------------------------
+
 
 def test_rehydrate_round_trips(db, db_user_id):
     msgs = [
@@ -200,6 +211,7 @@ def test_rehydrate_preserves_order(db, db_user_id):
 # batch_rehydrate_messages
 # ---------------------------------------------------------------------------
 
+
 def test_batch_rehydrate(db, db_user_id):
     msgs_a = [{"role": "user", "content": "a"}]
     msgs_b = [{"role": "user", "content": "b"}, {"role": "assistant", "content": "B"}]
@@ -215,6 +227,7 @@ def test_batch_rehydrate(db, db_user_id):
 # resolve_parent_entry_id
 # ---------------------------------------------------------------------------
 
+
 def test_no_parent_for_first_call(db, db_user_id):
     ids = [uuid.uuid4(), uuid.uuid4()]
     result = resolve_parent_entry_id(ids, "conv-1", db_user_id, uuid.uuid4(), db)
@@ -228,6 +241,7 @@ def test_disjoint_messages_no_parent(pg_engine, user_id):
     with Session(pg_engine) as db:
         from app.models.user import User
         from app.security.passwords import hash_password
+
         user = User(id=user_id, username="u", password_hash=hash_password("x"))
         db.add(user)
         db.flush()
@@ -236,15 +250,21 @@ def test_disjoint_messages_no_parent(pg_engine, user_id):
         msgs_a = [{"role": "user", "content": "apple"}]
         ids_a = intern_messages(msgs_a, user_id, db)
         entry_a_id = uuid.uuid4()
-        db.add(LogEntry(
-            id=entry_a_id,
-            user_id=user_id,
-            conversation_id="conv-disjoint",
-            message_ids=ids_a,
-            provider="openai", model="gpt-4o",
-            request={},
-            response={"message": {"role": "assistant", "content": "A"}, "finish_reason": "stop"},
-        ))
+        db.add(
+            LogEntry(
+                id=entry_a_id,
+                user_id=user_id,
+                conversation_id="conv-disjoint",
+                message_ids=ids_a,
+                provider="openai",
+                model="gpt-4o",
+                request={},
+                response={
+                    "message": {"role": "assistant", "content": "A"},
+                    "finish_reason": "stop",
+                },
+            )
+        )
         db.flush()
 
         # Entry B: [msg_banana, msg_cherry] — completely different first message
@@ -268,6 +288,7 @@ def test_parent_resolved_for_linear_append(pg_engine, user_id):
         # Create a minimal user row so FK is satisfied
         from app.models.user import User
         from app.security.passwords import hash_password
+
         user = User(id=user_id, username="u", password_hash=hash_password("x"))
         db.add(user)
         db.flush()
@@ -287,7 +308,8 @@ def test_parent_resolved_for_linear_append(pg_engine, user_id):
             user_id=user_id,
             conversation_id="conv-x",
             message_ids=ids_1,
-            provider="openai", model="gpt-4o",
+            provider="openai",
+            model="gpt-4o",
             request={},
             response={
                 "message": {"role": "assistant", "content": "Hi"},

@@ -36,6 +36,7 @@ def get_csrf_token(
     import uuid as _uuid
 
     from app.models.session import UserSession as _UserSession
+
     get_current_user(request, db)  # validates session
     raw_sid = request.cookies.get(SESSION_COOKIE)
     sess = db.get(_UserSession, _uuid.UUID(raw_sid))  # type: ignore[arg-type]
@@ -106,6 +107,7 @@ def me(user: User = Depends(get_current_user)) -> User:
 # ---------------------------------------------------------------------------
 # OAuth scaffolding (disabled — stubs for future implementation)
 # ---------------------------------------------------------------------------
+
 
 @router.get("/oauth/{provider}/authorize", include_in_schema=True, tags=["oauth (scaffold)"])
 def oauth_authorize(provider: str) -> dict:

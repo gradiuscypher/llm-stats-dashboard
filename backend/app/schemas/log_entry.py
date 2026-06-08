@@ -10,8 +10,10 @@ from pydantic import BaseModel, Field, model_validator
 # Sub-schemas for the canonical message format
 # ---------------------------------------------------------------------------
 
+
 class MessagePart(BaseModel):
     """A single part in a multimodal message (text, image_url, etc.)."""
+
     type: str
     text: str | None = None
     model_config = {"extra": "allow"}  # allow provider-specific fields
@@ -64,6 +66,7 @@ class CostPayload(BaseModel):
 # Top-level ingest schema
 # ---------------------------------------------------------------------------
 
+
 class LogEntryCreate(BaseModel):
     """
     Canonical log payload. See docs/schemas.md for the full reference.
@@ -71,6 +74,7 @@ class LogEntryCreate(BaseModel):
     Required fields: provider, model, request, response.
     All other fields are optional but strongly recommended.
     """
+
     conversation_id: str | None = Field(
         default=None,
         description=(
@@ -105,8 +109,10 @@ class LogEntryCreate(BaseModel):
 # Response schemas
 # ---------------------------------------------------------------------------
 
+
 class LogEntryPublic(BaseModel):
     """Summary row returned in list views."""
+
     id: uuid.UUID
     user_id: uuid.UUID
     conversation_id: str | None
@@ -131,6 +137,7 @@ class LogEntryPublic(BaseModel):
 
 class LogEntryDetail(LogEntryPublic):
     """Full detail including request/response bodies."""
+
     request: dict[str, Any]
     response: dict[str, Any]
     tool_calls: list[Any]
@@ -171,8 +178,10 @@ class ConversationListResponse(BaseModel):
 # Transcript schemas (Phase 2 — contiguous conversation view)
 # ---------------------------------------------------------------------------
 
+
 class TranscriptMessage(BaseModel):
     """A single message in the deduped transcript, with call attribution."""
+
     message_id: uuid.UUID
     role: str
     content: Any  # str | list[MessagePart] | dict
@@ -186,8 +195,9 @@ class TranscriptMessage(BaseModel):
 
 class CallDivider(BaseModel):
     """Metadata marker injected between messages at a call boundary."""
+
     entry_id: uuid.UUID
-    call_index: int          # 1-based position in this conversation branch
+    call_index: int  # 1-based position in this conversation branch
     model: str
     provider: str
     prompt_tokens: int
@@ -202,7 +212,8 @@ class CallDivider(BaseModel):
 
 class TranscriptBranch(BaseModel):
     """A linear sequence of messages sharing a common prefix with the trunk."""
-    branch_id: uuid.UUID      # entry_id of the first call that diverges
+
+    branch_id: uuid.UUID  # entry_id of the first call that diverges
     messages: list[TranscriptMessage]
     dividers: list[CallDivider]
 
@@ -214,10 +225,11 @@ class TranscriptResponse(BaseModel):
     For branching conversations: trunk contains shared prefix messages;
     branches contains each diverging path from the fork point.
     """
+
     conversation_id: str
     trunk: list[TranscriptMessage]
     branches: list[TranscriptBranch]
-    dividers: list[CallDivider]   # call markers along the trunk
+    dividers: list[CallDivider]  # call markers along the trunk
     total_tokens: int
     total_cost: float | None
     is_branched: bool

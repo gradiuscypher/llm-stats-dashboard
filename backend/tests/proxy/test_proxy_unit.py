@@ -9,46 +9,65 @@ from app.services.openrouter_map import derive_conversation_id, map_to_log_entry
 # StreamAssembler tests
 # ---------------------------------------------------------------------------
 
+
 class TestStreamAssembler:
     def test_accumulates_text_content(self):
         assembler = StreamAssembler(model="gpt-4o")
-        assembler.feed({
-            "choices": [{"delta": {"content": "Hello"}}],
-        })
-        assembler.feed({
-            "choices": [{"delta": {"content": " world"}}],
-        })
-        assembler.feed({
-            "choices": [{"delta": {}, "finish_reason": "stop"}],
-        })
+        assembler.feed(
+            {
+                "choices": [{"delta": {"content": "Hello"}}],
+            }
+        )
+        assembler.feed(
+            {
+                "choices": [{"delta": {"content": " world"}}],
+            }
+        )
+        assembler.feed(
+            {
+                "choices": [{"delta": {}, "finish_reason": "stop"}],
+            }
+        )
         result = assembler.assemble()
         assert result["choices"][0]["message"]["content"] == "Hello world"
         assert assembler.finish_reason == "stop"
 
     def test_accumulates_tool_calls(self):
         assembler = StreamAssembler(model="gpt-4o")
-        assembler.feed({
-            "choices": [{
-                "delta": {
-                    "tool_calls": [{
-                        "index": 0,
-                        "id": "call_123",
-                        "function": {"name": "get_weather", "arguments": '{"loc'},
-                    }]
-                }
-            }],
-        })
-        assembler.feed({
-            "choices": [{
-                "delta": {
-                    "tool_calls": [{
-                        "index": 0,
-                        "function": {"arguments": 'ation": "NYC"}'},
-                    }]
-                },
-                "finish_reason": "tool_calls",
-            }],
-        })
+        assembler.feed(
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "call_123",
+                                    "function": {"name": "get_weather", "arguments": '{"loc'},
+                                }
+                            ]
+                        }
+                    }
+                ],
+            }
+        )
+        assembler.feed(
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "function": {"arguments": 'ation": "NYC"}'},
+                                }
+                            ]
+                        },
+                        "finish_reason": "tool_calls",
+                    }
+                ],
+            }
+        )
         result = assembler.assemble()
         tool_calls = result["choices"][0]["message"]["tool_calls"]
         assert len(tool_calls) == 1
@@ -58,13 +77,17 @@ class TestStreamAssembler:
 
     def test_captures_usage(self):
         assembler = StreamAssembler(model="gpt-4o")
-        assembler.feed({
-            "choices": [{"delta": {"content": "Hi"}}],
-        })
-        assembler.feed({
-            "choices": [{"delta": {}, "finish_reason": "stop"}],
-            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
-        })
+        assembler.feed(
+            {
+                "choices": [{"delta": {"content": "Hi"}}],
+            }
+        )
+        assembler.feed(
+            {
+                "choices": [{"delta": {}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            }
+        )
         result = assembler.assemble()
         assert result["usage"]["prompt_tokens"] == 10
         assert result["usage"]["completion_tokens"] == 5
@@ -81,15 +104,21 @@ class TestStreamAssembler:
 
     def test_accumulates_reasoning_text(self):
         assembler = StreamAssembler(model="gpt-4o")
-        assembler.feed({
-            "choices": [{"delta": {"reasoning": "Let me think"}}],
-        })
-        assembler.feed({
-            "choices": [{"delta": {"reasoning": " about this."}}],
-        })
-        assembler.feed({
-            "choices": [{"delta": {"content": "Answer."}}],
-        })
+        assembler.feed(
+            {
+                "choices": [{"delta": {"reasoning": "Let me think"}}],
+            }
+        )
+        assembler.feed(
+            {
+                "choices": [{"delta": {"reasoning": " about this."}}],
+            }
+        )
+        assembler.feed(
+            {
+                "choices": [{"delta": {"content": "Answer."}}],
+            }
+        )
         result = assembler.assemble()
         msg = result["choices"][0]["message"]
         assert msg["reasoning"] == "Let me think about this."
@@ -97,24 +126,32 @@ class TestStreamAssembler:
 
     def test_accumulates_reasoning_details(self):
         assembler = StreamAssembler(model="gpt-4o")
-        assembler.feed({
-            "choices": [{
-                "delta": {
-                    "reasoning_details": [
-                        {"index": 0, "type": "reasoning.text", "text": "Step 1"},
-                    ]
-                }
-            }],
-        })
-        assembler.feed({
-            "choices": [{
-                "delta": {
-                    "reasoning_details": [
-                        {"index": 0, "type": "reasoning.text", "text": " done"},
-                    ]
-                }
-            }],
-        })
+        assembler.feed(
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "reasoning_details": [
+                                {"index": 0, "type": "reasoning.text", "text": "Step 1"},
+                            ]
+                        }
+                    }
+                ],
+            }
+        )
+        assembler.feed(
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "reasoning_details": [
+                                {"index": 0, "type": "reasoning.text", "text": " done"},
+                            ]
+                        }
+                    }
+                ],
+            }
+        )
         result = assembler.assemble()
         msg = result["choices"][0]["message"]
         assert msg["reasoning_details"] is not None
@@ -124,15 +161,19 @@ class TestStreamAssembler:
 
     def test_reasoning_details_encrypted_block(self):
         assembler = StreamAssembler(model="gpt-4o")
-        assembler.feed({
-            "choices": [{
-                "delta": {
-                    "reasoning_details": [
-                        {"index": 0, "type": "reasoning.encrypted", "text": "base64blob=="},
-                    ]
-                }
-            }],
-        })
+        assembler.feed(
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "reasoning_details": [
+                                {"index": 0, "type": "reasoning.encrypted", "text": "base64blob=="},
+                            ]
+                        }
+                    }
+                ],
+            }
+        )
         result = assembler.assemble()
         msg = result["choices"][0]["message"]
         assert msg["reasoning_details"][0]["type"] == "reasoning.encrypted"
@@ -140,32 +181,46 @@ class TestStreamAssembler:
 
     def test_reasoning_and_tool_calls_together(self):
         assembler = StreamAssembler(model="gpt-4o")
-        assembler.feed({
-            "choices": [{"delta": {"reasoning": "I need a tool."}}],
-        })
-        assembler.feed({
-            "choices": [{
-                "delta": {
-                    "content": "Let me check.",
-                    "tool_calls": [{
-                        "index": 0,
-                        "id": "call_x",
-                        "function": {"name": "search", "arguments": '{"q":'},
-                    }],
-                }
-            }],
-        })
-        assembler.feed({
-            "choices": [{
-                "delta": {
-                    "tool_calls": [{
-                        "index": 0,
-                        "function": {"arguments": '"hi"}'},
-                    }],
-                },
-                "finish_reason": "tool_calls",
-            }],
-        })
+        assembler.feed(
+            {
+                "choices": [{"delta": {"reasoning": "I need a tool."}}],
+            }
+        )
+        assembler.feed(
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "content": "Let me check.",
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "call_x",
+                                    "function": {"name": "search", "arguments": '{"q":'},
+                                }
+                            ],
+                        }
+                    }
+                ],
+            }
+        )
+        assembler.feed(
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "function": {"arguments": '"hi"}'},
+                                }
+                            ],
+                        },
+                        "finish_reason": "tool_calls",
+                    }
+                ],
+            }
+        )
         result = assembler.assemble()
         msg = result["choices"][0]["message"]
         assert msg["reasoning"] == "I need a tool."
@@ -175,12 +230,16 @@ class TestStreamAssembler:
     def test_reasoning_only_turn(self):
         """Reasoning without any final content should still assemble."""
         assembler = StreamAssembler(model="gpt-4o")
-        assembler.feed({
-            "choices": [{"delta": {"reasoning": "Just thinking."}}],
-        })
-        assembler.feed({
-            "choices": [{"delta": {}, "finish_reason": "stop"}],
-        })
+        assembler.feed(
+            {
+                "choices": [{"delta": {"reasoning": "Just thinking."}}],
+            }
+        )
+        assembler.feed(
+            {
+                "choices": [{"delta": {}, "finish_reason": "stop"}],
+            }
+        )
         result = assembler.assemble()
         msg = result["choices"][0]["message"]
         assert msg["reasoning"] == "Just thinking."
@@ -188,18 +247,22 @@ class TestStreamAssembler:
 
     def test_preserves_reasoning_tokens_in_usage(self):
         assembler = StreamAssembler(model="gpt-4o")
-        assembler.feed({
-            "choices": [{"delta": {"reasoning": "Hmm"}}],
-        })
-        assembler.feed({
-            "choices": [{"delta": {"content": "Done"}, "finish_reason": "stop"}],
-            "usage": {
-                "prompt_tokens": 10,
-                "completion_tokens": 15,
-                "total_tokens": 25,
-                "completion_tokens_details": {"reasoning_tokens": 8},
-            },
-        })
+        assembler.feed(
+            {
+                "choices": [{"delta": {"reasoning": "Hmm"}}],
+            }
+        )
+        assembler.feed(
+            {
+                "choices": [{"delta": {"content": "Done"}, "finish_reason": "stop"}],
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 15,
+                    "total_tokens": 25,
+                    "completion_tokens_details": {"reasoning_tokens": 8},
+                },
+            }
+        )
         result = assembler.assemble()
         assert result["usage"]["completion_tokens_details"]["reasoning_tokens"] == 8
 
@@ -207,6 +270,7 @@ class TestStreamAssembler:
 # ---------------------------------------------------------------------------
 # Conversation ID derivation tests
 # ---------------------------------------------------------------------------
+
 
 class TestDeriveConversationId:
     def test_explicit_header_wins(self):
@@ -259,6 +323,7 @@ class TestDeriveConversationId:
         with Session(pg_engine) as db:
             from app.models.user import User
             from app.security.passwords import hash_password
+
             uid = _uuid.uuid4()
             db.add(User(id=uid, username="pc_user", password_hash=hash_password("x")))
             db.flush()
@@ -308,6 +373,7 @@ class TestDeriveConversationId:
         with Session(pg_engine) as db:
             from app.models.user import User
             from app.security.passwords import hash_password
+
             uid = _uuid.uuid4()
             db.add(User(id=uid, username="pc_user2", password_hash=hash_password("x")))
             db.flush()
@@ -339,15 +405,14 @@ class TestDeriveConversationId:
                 user_id=uid,
                 db=db,
             )
-            assert cid != "or-abc123", (
-                "Equal-length retry must NOT chain — it's a new conversation"
-            )
+            assert cid != "or-abc123", "Equal-length retry must NOT chain — it's a new conversation"
             assert cid.startswith("or-")
 
 
 # ---------------------------------------------------------------------------
 # OpenRouter mapping tests
 # ---------------------------------------------------------------------------
+
 
 class TestMapToLogEntry:
     _USER_ID = "00000000-0000-0000-0000-000000000001"
@@ -357,13 +422,21 @@ class TestMapToLogEntry:
     def _make_user_key():
         from app.models.api_key import ApiKey
         from app.models.user import User
+
         user = User(
-            id=TestMapToLogEntry._USER_ID, username="test",
-            email="", password_hash="", is_active=True,
+            id=TestMapToLogEntry._USER_ID,
+            username="test",
+            email="",
+            password_hash="",
+            is_active=True,
         )
         api_key = ApiKey(
-            id=TestMapToLogEntry._KEY_ID, user_id=user.id, name="test",
-            prefix="lsd_abc", key_hash="", scopes=["proxy:use"],
+            id=TestMapToLogEntry._KEY_ID,
+            user_id=user.id,
+            name="test",
+            prefix="lsd_abc",
+            key_hash="",
+            scopes=["proxy:use"],
         )
         return user, api_key
 
@@ -389,14 +462,18 @@ class TestMapToLogEntry:
             "id": "chatcmpl-123",
             "object": "chat.completion",
             "model": "gpt-4o",
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": "4"},
-                "finish_reason": "stop",
-            }],
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "4"},
+                    "finish_reason": "stop",
+                }
+            ],
             "usage": {
-                "prompt_tokens": 20, "completion_tokens": 5,
-                "total_tokens": 25, "cost": 0.0001,
+                "prompt_tokens": 20,
+                "completion_tokens": 5,
+                "total_tokens": 25,
+                "cost": 0.0001,
             },
         }
 
@@ -431,17 +508,24 @@ class TestMapToLogEntry:
             is_stream=False,
         )
         upstream = {
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": [{
-                        "id": "call_abc",
-                        "function": {"name": "get_weather", "arguments": '{"location": "NYC"}'},
-                    }],
-                },
-                "finish_reason": "tool_calls",
-            }],
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": "call_abc",
+                                "function": {
+                                    "name": "get_weather",
+                                    "arguments": '{"location": "NYC"}',
+                                },
+                            }
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
             "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
         }
 
@@ -468,10 +552,12 @@ class TestMapToLogEntry:
             is_stream=False,
         )
         upstream = {
-            "choices": [{
-                "message": {"role": "assistant", "content": "Hi!"},
-                "finish_reason": "stop",
-            }],
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "Hi!"},
+                    "finish_reason": "stop",
+                }
+            ],
             "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
         }
 
@@ -489,8 +575,10 @@ class TestMapToLogEntry:
             request_body={
                 "model": "gpt-4o",
                 "messages": [
-                    {"role": "user", "content":
-                        {"type": "unsupported_future_type", "data": object()}},
+                    {
+                        "role": "user",
+                        "content": {"type": "unsupported_future_type", "data": object()},
+                    },
                 ],
             },
             request_headers={},
@@ -498,10 +586,12 @@ class TestMapToLogEntry:
             is_stream=False,
         )
         upstream = {
-            "choices": [{
-                "message": {"role": "assistant", "content": "ok"},
-                "finish_reason": "stop",
-            }],
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "ok"},
+                    "finish_reason": "stop",
+                }
+            ],
             "usage": {},
         }
 
@@ -528,18 +618,20 @@ class TestMapToLogEntry:
             is_stream=False,
         )
         upstream = {
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": "Here you go.",
-                    "reasoning": "Let me break this down step by step.",
-                    "reasoning_details": [
-                        {"type": "reasoning.text", "text": "Step 1: define"},
-                        {"type": "reasoning.text", "text": "Step 2: apply"},
-                    ],
-                },
-                "finish_reason": "stop",
-            }],
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "Here you go.",
+                        "reasoning": "Let me break this down step by step.",
+                        "reasoning_details": [
+                            {"type": "reasoning.text", "text": "Step 1: define"},
+                            {"type": "reasoning.text", "text": "Step 2: apply"},
+                        ],
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
             "usage": {
                 "prompt_tokens": 10,
                 "completion_tokens": 20,
@@ -579,10 +671,12 @@ class TestMapToLogEntry:
             is_stream=False,
         )
         upstream = {
-            "choices": [{
-                "message": {"role": "assistant", "content": "More."},
-                "finish_reason": "stop",
-            }],
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "More."},
+                    "finish_reason": "stop",
+                }
+            ],
             "usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7},
         }
 
@@ -609,10 +703,12 @@ class TestMapToLogEntry:
             is_stream=False,
         )
         upstream = {
-            "choices": [{
-                "message": {"role": "assistant", "content": "Hello"},
-                "finish_reason": "stop",
-            }],
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "Hello"},
+                    "finish_reason": "stop",
+                }
+            ],
             "usage": {"prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4},
         }
 

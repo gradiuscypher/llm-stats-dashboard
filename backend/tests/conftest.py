@@ -18,6 +18,7 @@ from app.security.passwords import hash_password
 # API integration tests use the test Postgres DB (see pg_session fixture).
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(name="sqlite_engine")
 def sqlite_engine_fixture():
     engine = create_engine(
@@ -39,6 +40,7 @@ def sqlite_session_fixture(sqlite_engine):
 # ---------------------------------------------------------------------------
 # Postgres test DB (integration tests)
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="session", name="pg_engine")
 def pg_engine_fixture():
@@ -65,6 +67,7 @@ def pg_session_fixture(pg_engine):
 # Test app + HTTP client (uses Postgres test DB)
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(name="client")
 def client_fixture(pg_engine):
     app = create_app()
@@ -83,13 +86,15 @@ def client_fixture(pg_engine):
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(name="clean_tables")
 def clean_tables_fixture(pg_engine) -> None:
     """Truncate all app tables for isolation. Call explicitly or via autouse wrapper."""
     with pg_engine.connect() as conn:
         conn.execute(
             text(
-                "TRUNCATE TABLE user_sessions, api_keys, log_entries, messages, users, model_prices "
+                "TRUNCATE TABLE user_sessions, api_keys, log_entries, "
+                "messages, users, model_prices "
                 "RESTART IDENTITY CASCADE"
             )
         )
@@ -119,6 +124,8 @@ def test_user_fixture(pg_engine, clean_tables) -> User:  # noqa: ARG001
 @pytest.fixture(name="auth_client")
 def auth_client_fixture(client, test_user) -> None:  # noqa: ARG001
     """TestClient with a valid session cookie set."""
-    resp = client.post("/api/v1/auth/login", json={"username": "testuser", "password": "testpass123"})
+    resp = client.post(
+        "/api/v1/auth/login", json={"username": "testuser", "password": "testpass123"}
+    )
     assert resp.status_code == 200, f"Login failed: {resp.json()}"
     yield client

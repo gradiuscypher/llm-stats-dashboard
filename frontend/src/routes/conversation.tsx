@@ -1,12 +1,8 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import {
-  logsApi,
-  TranscriptMessage,
-  CallDivider,
-  TranscriptBranch,
-} from "@/lib/api";
+import { logsApi, TranscriptMessage, CallDivider, TranscriptBranch } from "@/lib/api";
+import { selectReasoningRender } from "@/lib/reasoning";
 import { Layout } from "@/components/Layout";
 import { PageHeader } from "@/components/PageHeader";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -66,7 +62,9 @@ function DividerBar({ divider }: { divider: CallDivider }) {
         {divider.reasoning_tokens > 0 && (
           <>
             <span className="text-[var(--color-border)]">·</span>
-            <span className="text-[var(--color-text-faint)]">{divider.reasoning_tokens.toLocaleString()} think</span>
+            <span className="text-[var(--color-text-faint)]">
+              {divider.reasoning_tokens.toLocaleString()} think
+            </span>
           </>
         )}
         {divider.latency_ms != null && (
@@ -98,9 +96,8 @@ function ReasoningBlock({
 }) {
   const [expanded, setExpanded] = useState(false);
 
-  const hasReasoning = typeof reasoning === "string" && reasoning.trim().length > 0;
-  const hasDetails = Array.isArray(reasoning_details) && reasoning_details.length > 0;
-  if (!hasReasoning && !hasDetails) return null;
+  const render = selectReasoningRender(reasoning, reasoning_details);
+  if (!render) return null;
 
   return (
     <div className="mt-2 border border-[var(--color-border)] bg-[var(--color-bg-alt)]">
@@ -113,38 +110,34 @@ function ReasoningBlock({
       >
         <span className="text-[11px]">{expanded ? "▾" : "▸"}</span>
         Thinking
-        {hasReasoning && (
-          <span className="font-normal lowercase tracking-normal opacity-50">
-            ({reasoning!.length} chars)
-          </span>
-        )}
+        <span className="font-normal lowercase tracking-normal opacity-50">
+          ({render.charCount.toLocaleString()} chars)
+        </span>
       </button>
       {expanded && (
         <div
           className="px-3 pb-2 text-xs whitespace-pre-wrap leading-relaxed
                      text-[var(--color-text-muted)] opacity-80"
         >
-          {hasReasoning && <p>{reasoning}</p>}
-          {hasDetails &&
-            reasoning_details!.map((block, i) => {
-              if (typeof block === "object" && block !== null) {
-                const b = block as Record<string, unknown>;
-                const type = typeof b.type === "string" ? b.type : "";
-                const text = typeof b.text === "string" ? b.text : "";
-                // Encrypted / redacted blocks: show labeled placeholder
-                if (type.includes("encrypted") || type.includes("redacted")) {
-                  return (
-                    <p key={i} className="italic opacity-50">
-                      [{type} reasoning block]
-                    </p>
-                  );
-                }
-                if (text) {
-                  return <p key={i}>{text}</p>;
-                }
+          {render.mode === "details" ? (
+            render.blocks.map((block, i) => {
+              const isEncryptedOrRedacted =
+                block.type?.includes("encrypted") || block.type?.includes("redacted");
+              if (isEncryptedOrRedacted) {
+                return (
+                  <p key={i} className="italic opacity-50">
+                    [{block.type} reasoning block]
+                  </p>
+                );
+              }
+              if (block.text) {
+                return <p key={i}>{block.text}</p>;
               }
               return null;
-            })}
+            })
+          ) : (
+            <p>{render.text}</p>
+          )}
         </div>
       )}
     </div>
@@ -164,14 +157,9 @@ function MessageBubble({ msg }: { msg: TranscriptMessage }) {
 
   return (
     <div className={`px-4 py-3 border-b border-[var(--color-border)] ${styleClass}`}>
-      <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5 opacity-60">
-        {label}
-      </p>
+      <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5 opacity-60">{label}</p>
       {showReasoning && (
-        <ReasoningBlock
-          reasoning={msg.reasoning}
-          reasoning_details={msg.reasoning_details}
-        />
+        <ReasoningBlock reasoning={msg.reasoning} reasoning_details={msg.reasoning_details} />
       )}
       <p className="text-sm whitespace-pre-wrap leading-relaxed break-words">{displayText}</p>
       {isLong && (
@@ -201,9 +189,7 @@ function MessageThread({
   const dividerBeforeEntry: Map<string, CallDivider> = new Map();
   for (const div of dividers) {
     // The first message in this call that was introduced by it.
-    const firstMsg = messages.find(
-      (m) => m.introduced_by_entry_id === div.entry_id
-    );
+    const firstMsg = messages.find((m) => m.introduced_by_entry_id === div.entry_id);
     if (firstMsg) dividerBeforeEntry.set(firstMsg.message_id, div);
   }
 
@@ -234,9 +220,7 @@ function BranchPanel({
   if (branches.length === 0) return null;
 
   const branch = branches[activeBranch];
-  const firstDivider = branch.dividers[0]
-    ? dividerMap.get(branch.dividers[0].entry_id)
-    : undefined;
+  const firstDivider = branch.dividers[0] ? dividerMap.get(branch.dividers[0].entry_id) : undefined;
 
   return (
     <div className="mt-4">
@@ -251,9 +235,10 @@ function BranchPanel({
               key={b.branch_id}
               onClick={() => setActiveBranch(i)}
               className={`px-2 py-0.5 text-xs border transition-colors cursor-pointer
-                ${activeBranch === i
-                  ? "border-[var(--color-accent)] text-[var(--color-accent)] bg-transparent"
-                  : "border-[var(--color-border)] text-[var(--color-text-faint)] bg-transparent hover:border-[var(--color-text-muted)]"
+                ${
+                  activeBranch === i
+                    ? "border-[var(--color-accent)] text-[var(--color-accent)] bg-transparent"
+                    : "border-[var(--color-border)] text-[var(--color-text-faint)] bg-transparent hover:border-[var(--color-text-muted)]"
                 }`}
             >
               {div ? `from call #${div.call_index}` : `Branch ${i + 1}`}
@@ -299,9 +284,7 @@ export function ConversationPage({ conversationId }: ConversationPageProps) {
           <div className="flex gap-4 mb-6 text-xs text-[var(--color-text-muted)]">
             <span>{data?.dividers.length ?? 0} calls</span>
             <span>{(data?.total_tokens ?? 0).toLocaleString()} tokens</span>
-            {data?.total_cost != null && (
-              <span>${data.total_cost.toFixed(6)}</span>
-            )}
+            {data?.total_cost != null && <span>${data.total_cost.toFixed(6)}</span>}
             {data?.is_branched && (
               <span className="text-[var(--color-accent)]">
                 {data.branches.length} branch{data.branches.length !== 1 ? "es" : ""}
@@ -311,10 +294,7 @@ export function ConversationPage({ conversationId }: ConversationPageProps) {
 
           {/* Main trunk thread */}
           {(data?.trunk ?? []).length > 0 ? (
-            <MessageThread
-              messages={data!.trunk}
-              dividers={data!.dividers}
-            />
+            <MessageThread messages={data!.trunk} dividers={data!.dividers} />
           ) : (
             <p className="text-sm text-[var(--color-text-muted)]">
               No messages in this conversation.
@@ -322,12 +302,7 @@ export function ConversationPage({ conversationId }: ConversationPageProps) {
           )}
 
           {/* Branch panels (only shown when conversation has divergences) */}
-          {data?.is_branched && (
-            <BranchPanel
-              branches={data.branches}
-              dividerMap={dividerMap}
-            />
-          )}
+          {data?.is_branched && <BranchPanel branches={data.branches} dividerMap={dividerMap} />}
         </>
       )}
     </Layout>

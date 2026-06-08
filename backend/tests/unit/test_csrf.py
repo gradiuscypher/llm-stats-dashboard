@@ -1,6 +1,5 @@
 """Unit tests for CSRF token generation and validation."""
 
-
 from app.security.csrf import generate_csrf_token, validate_csrf_token
 
 
