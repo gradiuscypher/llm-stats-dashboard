@@ -88,7 +88,7 @@
 
 html {
   font-family: var(--font-mono);
-  font-size: var(--font-size-base, 15px);
+  font-size: var(--font-size-base, 20px);
   line-height: 1.5;
   background: var(--color-bg);
   color: var(--color-text);

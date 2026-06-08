@@ -407,6 +407,15 @@ export function ConversationPage({ conversationId }: ConversationPageProps) {
                 {data.branches.length} branch{data.branches.length !== 1 ? "es" : ""}
               </span>
             )}
+            {data?.compression && (
+              <span className="text-[var(--color-accent)]">
+                {(data.compression.compression_ratio * 100).toFixed(0)}% compressed
+                <span className="text-[var(--color-text-faint)]">
+                  {" "}
+                  ({data.compression.tokens_saved.toLocaleString()} tok saved)
+                </span>
+              </span>
+            )}
             {/* Diff toggle */}
             <button
               onClick={() => setShowDiff(!showDiff)}

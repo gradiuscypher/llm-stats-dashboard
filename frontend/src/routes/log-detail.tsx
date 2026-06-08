@@ -243,7 +243,7 @@ export function LogDetailPage({ logId }: LogDetailPageProps) {
                 [
                   "Compression Transforms",
                   <span key="trans" className="text-xs text-[var(--color-accent)]">
-                    {log.metadata_extra.compression.transforms_applied.join(", ")}
+                    {[...new Set(log.metadata_extra.compression.transforms_applied)].join(", ")}
                   </span>,
                 ],
               ]

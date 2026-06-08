@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import func
+from sqlalchemy import Integer, cast, func
 from sqlmodel import Session, select
 
 from app.db import get_session
@@ -16,6 +16,7 @@ from app.models.message_modification import MessageModification
 from app.models.user import User
 from app.schemas.log_entry import (
     CallDivider,
+    CompressionSummary,
     ConversationListResponse,
     ConversationResponse,
     ConversationSummary,
@@ -393,6 +394,15 @@ async def list_conversations(
             func.count().label("call_count"),
             func.coalesce(func.sum(LogEntry.total_tokens), 0).label("total_tokens"),
             func.sum(LogEntry.cost_total).label("total_cost"),
+            func.coalesce(
+                func.sum(
+                    cast(
+                        LogEntry.metadata_extra.op("->")("compression").op("->>")("tokens_saved"),
+                        Integer,
+                    )
+                ),
+                0,
+            ).label("tokens_saved"),
             func.min(LogEntry.created_at).label("first_activity"),
             func.max(LogEntry.created_at).label("last_activity"),
             func.bool_or(LogEntry.status == "error").label("has_error"),
@@ -430,6 +440,7 @@ async def list_conversations(
                 call_count=row.call_count,
                 total_tokens=row.total_tokens,
                 total_cost=round(row.total_cost, 8) if row.total_cost is not None else None,
+                tokens_saved=int(row.tokens_saved) if row.tokens_saved is not None else 0,
                 models=sorted(set(row.models)),
                 providers=sorted(set(row.providers)),
                 has_error=row.has_error,
@@ -831,6 +842,31 @@ async def get_transcript(
     costs = [e.cost_total for e in entries if e.cost_total is not None]
     total_cost = round(sum(costs), 8) if costs else None
 
+    # Aggregate compression stats across all calls
+    compression = None
+    comp_before = 0
+    comp_after = 0
+    comp_saved = 0
+    comp_calls = 0
+    for e in entries:
+        c = e.metadata_extra.get("compression") if e.metadata_extra else None
+        if c and isinstance(c, dict):
+            tb = c.get("tokens_before", 0)
+            ts = c.get("tokens_saved", 0)
+            if tb > 0:
+                comp_before += tb
+                comp_after += tb - ts
+                comp_saved += ts
+                comp_calls += 1
+    if comp_calls > 0 and comp_before > 0:
+        compression = CompressionSummary(
+            tokens_before=comp_before,
+            tokens_after=comp_after,
+            tokens_saved=comp_saved,
+            compression_ratio=comp_saved / comp_before,
+            calls_with_compression=comp_calls,
+        )
+
     return TranscriptResponse(
         conversation_id=conversation_id,
         trunk=trunk_messages,
@@ -839,6 +875,7 @@ async def get_transcript(
         total_tokens=total_tokens,
         total_cost=total_cost,
         is_branched=is_branched,
+        compression=compression,
     )
 
 

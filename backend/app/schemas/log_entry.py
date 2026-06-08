@@ -193,6 +193,9 @@ class ConversationSummary(BaseModel):
     call_count: int
     total_tokens: int
     total_cost: float | None
+    # Sum of compression token savings across all calls in the conversation.
+    # Only counts calls that have metadata_extra.compression.tokens_saved set.
+    tokens_saved: int = 0
     # Distinct models/providers seen in this conversation (sorted, deduped)
     models: list[str]
     providers: list[str]
@@ -264,6 +267,16 @@ class TranscriptBranch(BaseModel):
     dividers: list[CallDivider]
 
 
+class CompressionSummary(BaseModel):
+    """Aggregate compression savings for a conversation."""
+
+    tokens_before: int
+    tokens_after: int
+    tokens_saved: int
+    compression_ratio: float  # tokens_saved / tokens_before (0–1)
+    calls_with_compression: int
+
+
 class TranscriptResponse(BaseModel):
     """Full conversation transcript — linear or branching.
 
@@ -279,6 +292,8 @@ class TranscriptResponse(BaseModel):
     total_tokens: int
     total_cost: float | None
     is_branched: bool
+    # Aggregate compression savings (null when no call has compression data)
+    compression: CompressionSummary | None = None
 
 
 class DailyStats(BaseModel):

@@ -136,6 +136,7 @@ export function ConversationsPage() {
                       <span className="text-[var(--color-accent)]">{sortIndicator(col)}</span>
                     </th>
                   ))}
+                  <th>Saved</th>
                   <th>Models</th>
                   <th>Providers</th>
                   <th>Status</th>
@@ -157,6 +158,11 @@ export function ConversationsPage() {
                     <td className="tabular-nums">{row.total_tokens.toLocaleString()}</td>
                     <td className="tabular-nums">{fmtCost(row.total_cost)}</td>
                     <td className="tabular-nums">{row.call_count}</td>
+                    <td className="tabular-nums text-[var(--color-accent)]">
+                      {row.tokens_saved
+                        ? `${((row.tokens_saved / (row.total_tokens + row.tokens_saved)) * 100).toFixed(0)}%`
+                        : "—"}
+                    </td>
                     <td>
                       <span className="text-xs">
                         {row.models.length <= 2
@@ -176,7 +182,7 @@ export function ConversationsPage() {
                 ))}
                 {rows.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="text-center text-[var(--color-text-faint)] py-6">
+                    <td colSpan={9} className="text-center text-[var(--color-text-faint)] py-6">
                       No conversations found.
                     </td>
                   </tr>
