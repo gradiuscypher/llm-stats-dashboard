@@ -80,9 +80,9 @@ def update_me(
             )
         current_user.password_hash = hash_password(payload.password)
 
-    from datetime import datetime
+    from app.utils.time import utcnow
 
-    current_user.updated_at = datetime.utcnow()
+    current_user.updated_at = utcnow()
     db.add(current_user)
     db.commit()
     db.refresh(current_user)

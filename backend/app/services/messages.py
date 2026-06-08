@@ -67,7 +67,7 @@ def intern_messages(
     # Use the raw DBAPI cursor to avoid SQLAlchemy parameter-style mixing
     # issues with psycopg3 when combining named binds and Postgres casts.
     raw_conn = db.connection().connection
-    with raw_conn.cursor() as cur:
+    with raw_conn.cursor() as cur:# ty:ignore[invalid-context-manager]
         for i, h in enumerate(hashes):
             cur.execute(
                 """
@@ -88,7 +88,7 @@ def intern_messages(
     existing_rows = db.exec(
         select(Message).where(
             Message.user_id == user_id,
-            Message.content_hash.in_(hashes),  # type: ignore[attr-defined]
+            Message.content_hash.in_(hashes),# ty:ignore[unresolved-attribute]
         )
     ).all()
 
@@ -116,7 +116,7 @@ def rehydrate_messages(
         return []
 
     rows = db.exec(
-        select(Message).where(Message.id.in_(message_ids))  # type: ignore[attr-defined]
+        select(Message).where(Message.id.in_(message_ids))# ty:ignore[unresolved-attribute]
     ).all()
 
     id_to_content = {row.id: row.content for row in rows}
@@ -140,7 +140,7 @@ def batch_rehydrate_messages(
         return {}
 
     rows = db.exec(
-        select(Message).where(Message.id.in_(list(all_ids)))  # type: ignore[attr-defined]
+        select(Message).where(Message.id.in_(list(all_ids)))# ty:ignore[unresolved-attribute]
     ).all()
 
     return {row.id: row.content for row in rows}
@@ -185,7 +185,7 @@ def resolve_parent_entry_id(
             LogEntry.conversation_id == conversation_id,
             LogEntry.id != current_entry_id,
         )
-        .order_by(LogEntry.created_at.desc())  # most recent first for tie-breaking
+        .order_by(LogEntry.created_at.desc())  # ty:ignore[unresolved-attribute]  # most recent first for tie-breaking
     ).all()
 
     if not candidates:
@@ -193,6 +193,7 @@ def resolve_parent_entry_id(
 
     # Sort by descending prefix length for greedy match.
     # created_at.desc() in the query ensures recency wins ties.
+    candidates = list(candidates)
     candidates.sort(key=lambda e: len(e.message_ids), reverse=True)
 
     for candidate in candidates:

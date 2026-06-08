@@ -210,16 +210,69 @@ and manually-ingested calls appear side by side in the dashboard.
 
 ## Plugin architecture
 
-The proxy runs a plugin pipeline for each request. The default pipeline is
-`logging` (configured via `PROXY_PLUGINS=logging`). Available plugins:
+The proxy runs a plugin pipeline for each request. Plugins can inspect and mutate
+incoming requests (before they reach OpenRouter) and outgoing responses (before
+they return to the client). Every mutation is **explicitly logged** and visible
+in the dashboard.
+
+### Available plugins
 
 | Plugin | Status | Description |
 |--------|--------|-------------|
-| `logging` | **active** | Maps OpenRouter → canonical schema, persists to DB |
-| `compression` | **stub** | No-op skeleton; future: trim/dedupe messages to save tokens |
+| `logging` | **active (locked)** | Maps OpenRouter → canonical schema, persists to DB. Always on, cannot be disabled. |
+| `compression` | **active** | Compresses messages via Headroom to save tokens before forwarding. Four compressors: JSON SmartCrusher, code AST, ONNX text Kompress, CacheAligner. CPU-only. On by default. |
+| `word_count` | **sample** | Appends a `[word_count: N]` marker to the last user message and the assistant response. Demonstrates the full modification-logging + toggle machinery. |
 
-The pipeline is configured globally via the `PROXY_PLUGINS` env var.
-Per-user/per-key plugin config is designed-for but not yet built.
+### Plugin toggles
+
+Plugins can be enabled/disabled at two levels:
+
+1. **User-global** (Settings page): applies to all future conversations.
+2. **Per-conversation override** (Conversation page): supersedes the global
+   setting for future calls in that specific conversation.
+
+Toggle behavior:
+- Order is always determined by the `PROXY_PLUGINS` env var; toggles only
+  enable/disable within that order.
+- `logging` is locked enabled — it cannot be turned off.
+- A per-conversation override wins over the user-global setting, which wins
+  over the default (plugins in `PROXY_PLUGINS` are on by default; others off).
+- An *enable* at either the user-global or per-conversation level brings a
+  plugin into the pipeline even when it is **not** listed in `PROXY_PLUGINS`
+  (such plugins run after the env-ordered ones). In particular, a
+  per-conversation override can turn a plugin **on** for a single conversation
+  even if it is globally off and absent from `PROXY_PLUGINS`.
+- The conversation id used for per-conversation override resolution is determined
+  pre-call (from the `X-Conversation-Id` header or the deterministic candidate
+  derivation). The authoritative id is still computed post-call in the logging
+  plugin for prefix-ancestor inheritance.
+
+### Modification logging
+
+Every change a plugin makes to a message is persisted in the
+`message_diffs` table and surfaced in the UI:
+
+- **Logs list**: entries with modifications show a `✎ N` badge.
+- **Log detail**: a "Modifications" section lists each change with expandable
+  detail.
+- **Conversation transcript**: call dividers show the `✎ N` badge; modified
+  messages show a left accent border and "modified by <plugin>" label.
+
+**Canonical history = original messages.** The transcript always shows your
+**original** messages (what you actually sent). When a transform modified what
+was sent upstream, an overlay diff shows the original → sent-upstream content.
+This means: (a) the conversation tree is stable across plugin toggles—disabling
+or re-enabling a plugin never splits or collapses the transcript; (b) past
+modifications are immutable history—disabling a plugin does not retroactively
+un-modify past calls; and (c) the diff view always shows exactly what changed
+between your message and what the model received.
+
+### Response-side modifications & streaming
+
+Response-side modifications (e.g. WordCount appending a marker to the assistant
+reply) are applied to the **non-stream** client-visible copy inline. For
+**streamed** responses, the marker is applied to the logged/assembled copy only
+(client stream is unchanged in MVP).
 
 ---
 
@@ -230,9 +283,20 @@ OPENROUTER_API_KEY=sk-or-...           # server-held upstream key (required)
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 OPENROUTER_REFERER=                    # optional HTTP-Referer header
 OPENROUTER_APP_TITLE=LLM Stats Dashboard
-PROXY_PLUGINS=logging                  # comma-separated plugin names
+# Available plugins: logging, compression, word_count
+# logging is always-on and cannot be disabled
+# Default: compression,logging (compression enabled by default)
+PROXY_PLUGINS=compression,logging                  # comma-separated plugin names
 PROXY_UPSTREAM_TIMEOUT_S=120
 PROXY_STREAM_IDLE_TIMEOUT_S=120
+
+# Compression settings (see docs/compression.md)
+# COMPRESSION_TARGET_RATIO=          # None = auto; 0.5 = reduce to 50%
+# COMPRESSION_PROTECT_RECENT=4       # keep N most recent messages untouched
+# COMPRESSION_COMPRESS_USER_MESSAGES=false
+# COMPRESSION_COMPRESS_SYSTEM_MESSAGES=true
+# COMPRESSION_MIN_TOKENS=250         # minimum tokens to trigger compression
+# COMPRESSION_KOMPRESS_MODEL=        # "" = default ONNX; "disabled" = no ML text
 ```
 
 ---
@@ -265,9 +329,12 @@ Returns:
 
 ## Future
 
-- Compression strategies (history trimming, message dedupe, summarization)
 - Per-user / per-key plugin configuration
 - Per-user OpenRouter keys
 - Caching plugin (semantic/exact-match)
 - Additional providers (OpenAI, Anthropic native)
 - Prompt firewall / PII redaction
+
+## Compression
+
+See [compression.md](compression.md) for full compression plugin documentation.

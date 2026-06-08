@@ -6,6 +6,8 @@ from datetime import datetime
 from sqlalchemy import ARRAY, String
 from sqlmodel import Column, Field, SQLModel
 
+from app.utils.time import utcnow
+
 
 class ApiKey(SQLModel, table=True):
     __tablename__ = "api_keys"
@@ -23,7 +25,7 @@ class ApiKey(SQLModel, table=True):
 
     last_used_at: datetime | None = Field(default=None)
     revoked_at: datetime | None = Field(default=None)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
 
     @property
     def is_revoked(self) -> bool:

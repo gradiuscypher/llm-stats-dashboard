@@ -12,15 +12,15 @@ For a human-facing summary and quick start, see [README.md](README.md).
 
 ## Planning
 
-When the user explicitly asks you to **write a plan**, create a Markdown file in the
-`plans/` directory — one file per feature/effort (e.g. `plans/CONVERSATIONS_PAGE_PLAN.md`).
-Do not write plan files unprompted just because planning is mentioned in conversation.
-Do not put plans at the repo root, in commit messages, or only in chat.
+When the user asks you to plan something, **output the plan in chat by default**. Only
+write a plan to a file when the user explicitly asks you to **write a plan file** or
+**create a plan** — and only then, create a Markdown file in the `plans/` directory
+(e.g. `plans/CONVERSATIONS_PAGE_PLAN.md`).
 
 - Use a descriptive, uppercase-with-underscores filename ending in `_PLAN.md`.
-- A plan should be detailed enough that another agent can implement it without
-  re-discovering the codebase: list the exact files to change, new schemas/types,
-  endpoints, tests, and verification steps.
+- A plan (whether in chat or file) should be detailed enough that another agent can
+  implement it without re-discovering the codebase: list the exact files to change,
+  new schemas/types, endpoints, tests, and verification steps.
 - Keep existing plans (`plans/PLAN.md`, `plans/PROXY_PLAN.md`, etc.) as historical
   context; add new files rather than overwriting unrelated ones.
 

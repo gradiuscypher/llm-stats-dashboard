@@ -35,6 +35,8 @@ grouped into conversations through a web dashboard.
 
 Key design points: messages are **interned/deduplicated** in a `messages` table and
 referenced by `LogEntry.message_ids`; `parent_entry_id` rebuilds the conversation tree.
+Canonical history stores **original** (pre-transform) messages — plugin transforms are
+tracked as diffs (overlay) so the conversation tree is stable across toggles.
 See [OVERVIEW.md](OVERVIEW.md) for the detailed map (models, routers, services, security,
 and frontend routes).
 

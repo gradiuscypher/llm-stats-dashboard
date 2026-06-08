@@ -52,7 +52,6 @@ def test_ingest_success(auth_client):
     assert data["provider"] == "openai"
     assert data["model"] == "gpt-4o"
     assert data["total_tokens"] == 15
-    return data
 
 
 def test_list_logs(auth_client):
@@ -296,12 +295,13 @@ def test_transcript_single_call_ends_with_response(auth_client):
     )
 
     t = auth_client.get("/api/v1/conversations/tc-trailing/transcript").json()
-    assert len(t["trunk"]) == 3  # system, user, synthetic-assistant
+    assert len(t["trunk"]) == 3  # system, user, assistant (from message_ids)
     last = t["trunk"][-1]
     assert last["role"] == "assistant"
     assert last["content"] == "Hello there!"
-    # No divider should fire for the synthetic reply.
-    assert last["introduced_by_entry_id"] is None
+    # The assistant reply is now interned as part of message_ids, so it is
+    # attributed to the entry (not a synthetic message with None).
+    assert last["introduced_by_entry_id"] is not None
 
 
 def test_transcript_multi_turn_ends_with_last_response(auth_client):
@@ -332,7 +332,8 @@ def test_transcript_multi_turn_ends_with_last_response(auth_client):
     )
 
     t = auth_client.get("/api/v1/conversations/tc-two-turn/transcript").json()
-    # Trunk: user(Q1) → assistant(A1) → user(Q2) → synthetic(A2)
+    # Trunk: user(Q1) → assistant(A1) → user(Q2) → assistant(A2)
+    # All messages are now interned as part of message_ids.
     assert len(t["trunk"]) == 4
     last = t["trunk"][-1]
     assert last["role"] == "assistant"

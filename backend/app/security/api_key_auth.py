@@ -2,7 +2,6 @@
 
 import logging
 from collections.abc import Callable
-from datetime import datetime
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlmodel import Session, select
@@ -11,6 +10,7 @@ from app.db import get_session
 from app.models.api_key import ApiKey
 from app.models.user import User
 from app.security.passwords import verify_password
+from app.utils.time import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +91,7 @@ async def get_current_user_from_api_key(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
 
     # Update last_used_at
-    matched.last_used_at = datetime.utcnow()
+    matched.last_used_at = utcnow()
     db.add(matched)
     db.commit()
 

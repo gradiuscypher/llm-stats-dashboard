@@ -24,7 +24,6 @@ def test_create_key(auth_client):
     assert "raw_key" in data
     assert data["raw_key"].startswith("lsd_")
     assert data["scopes"] == ["logs:write"]
-    return data
 
 
 def test_raw_key_not_in_list(auth_client):

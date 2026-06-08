@@ -15,7 +15,16 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.responses import Response as StarletteResponse  # noqa: E402
 
 from app.config import settings  # noqa: E402
-from app.routers import api_keys, auth, docs_router, health, logs, proxy, users  # noqa: E402
+from app.routers import (  # noqa: E402
+    api_keys,
+    auth,
+    docs_router,
+    health,
+    logs,
+    plugins,
+    proxy,
+    users,
+)
 
 request_logger = logging.getLogger("app.requests")
 
@@ -118,7 +127,7 @@ def create_app() -> FastAPI:
 
     # Rate limiter
     app.state.limiter = limiter
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)# ty:ignore[invalid-argument-type]
 
     # Request logging (DEBUG-level; logs auth header prefix + status)
     app.add_middleware(RequestLoggingMiddleware)
@@ -142,6 +151,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router, prefix=prefix)
     app.include_router(users.router, prefix=prefix)
     app.include_router(api_keys.router, prefix=prefix)
+    app.include_router(plugins.router, prefix=prefix)
     app.include_router(logs.router, prefix=prefix)
     app.include_router(docs_router.router, prefix=prefix)
     # Proxy router is registered last — its paths don't collide with existing routes

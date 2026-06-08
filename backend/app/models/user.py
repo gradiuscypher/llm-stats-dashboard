@@ -5,6 +5,8 @@ from datetime import datetime
 
 from sqlmodel import Field, SQLModel
 
+from app.utils.time import utcnow
+
 
 class User(SQLModel, table=True):
     __tablename__ = "users"
@@ -20,5 +22,5 @@ class User(SQLModel, table=True):
     oauth_provider: str | None = Field(default=None)
 
     is_active: bool = Field(default=True)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)

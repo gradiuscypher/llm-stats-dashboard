@@ -1,30 +1,20 @@
-"""Plugin base classes and protocol.
+"""Plugin base classes and protocols.
 
-ProxyPlugin is the protocol that all proxy plugins conform to.
-BasePlugin provides no-op defaults so plugins only implement what they need.
+RequestTransform is the protocol that all request-only transform plugins conform to.
+BasePlugin is kept as a deprecated compatibility shim.
 """
 
-from app.proxy.context import ProxyContext
+from app.proxy.interceptor import RequestTransform, TransformContext
+
+# Re-export for convenience — plugins import from here.
+__all__ = ["RequestTransform", "TransformContext", "BasePlugin"]
 
 
+# Legacy compatibility — use RequestTransform for new plugins.
 class BasePlugin:
-    """ABC with no-op defaults for all four hooks.
+    """Deprecated. Use RequestTransform for request-only transforms.
 
-    Concrete plugins inherit from this and override only the hooks they need.
+    Kept as a stub for any external code that references it.
     """
 
     name: str
-
-    async def on_request(self, ctx: ProxyContext) -> None:
-        """Inspect / mutate ctx.request_body before forwarding."""
-
-    async def on_stream_chunk(self, ctx: ProxyContext, chunk: dict) -> dict | None:
-        """Called per SSE delta. Return a (possibly mutated) chunk to relay,
-        or None to drop it. Default impl returns chunk unchanged."""
-        return chunk
-
-    async def on_response(self, ctx: ProxyContext) -> None:
-        """Called once with the fully-assembled response."""
-
-    async def on_error(self, ctx: ProxyContext, error: Exception) -> None:
-        """Called if the upstream call or stream fails."""

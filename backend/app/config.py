@@ -1,5 +1,7 @@
 """Application configuration via environment variables."""
 
+import os
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -29,9 +31,20 @@ class Settings(BaseSettings):
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openrouter_referer: str = ""
     openrouter_app_title: str = "LLM Stats Dashboard"
-    proxy_plugins: str = "logging"  # ordered, comma-separated plugin names
+    proxy_plugins: str = "compression,logging"  # ordered, comma-separated plugin names
     proxy_upstream_timeout_s: int = 120
     proxy_stream_idle_timeout_s: int = 120
+
+    # Compression (Headroom)
+    compression_target_ratio: float | None = None
+    compression_protect_recent: int = 4
+    compression_compress_user_messages: bool = False
+    compression_compress_system_messages: bool = True
+    compression_min_tokens: int = 250
+    compression_kompress_model: str = (
+        ""  # "" -> Headroom default ONNX model; "disabled" -> ML text off
+    )
+    headroom_telemetry: bool = False  # if False, set HEADROOM_TELEMETRY=off at startup
 
     @property
     def is_production(self) -> bool:
@@ -39,3 +52,7 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# Disable Headroom telemetry unless explicitly enabled.
+if not settings.headroom_telemetry:
+    os.environ.setdefault("HEADROOM_TELEMETRY", "off")

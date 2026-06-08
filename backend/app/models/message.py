@@ -10,6 +10,8 @@ from datetime import datetime
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Column, Field, SQLModel, UniqueConstraint
 
+from app.utils.time import utcnow
+
 
 class Message(SQLModel, table=True):
     __tablename__ = "messages"
@@ -31,4 +33,4 @@ class Message(SQLModel, table=True):
     # Full canonical message object — kept as JSONB so SQL can query inside it.
     content: dict = Field(default_factory=dict, sa_column=Column(JSONB, nullable=False))
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)

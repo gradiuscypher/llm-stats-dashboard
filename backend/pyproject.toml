@@ -17,6 +17,7 @@ dependencies = [
     "uvicorn[standard]>=0.34",
     "httpx>=0.28",              # proxy upstream client (async + streaming) + TestClient
     "respx>=0.22",               # mock httpx for proxy tests
+    "headroom-ai[code,proxy]>=0.23.0",
 ]
 
 [project.optional-dependencies]
@@ -53,7 +54,6 @@ testpaths = ["tests"]
 env = ["LSD_TEST_MODE=1"]
 
 [tool.ty]
-python-version = "3.12"
 
 [dependency-groups]
 dev = [

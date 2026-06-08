@@ -2,20 +2,21 @@
 
 import uuid
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from sqlmodel import Session, select
 
 from app.models.log_entry import LogEntry
 from app.schemas.log_entry import DailyStats, ModelStats, StatsResponse
+from app.utils.time import utcnow
 
 
 def get_stats(user_id: uuid.UUID, db: Session, days: int = 30) -> StatsResponse:
-    since = datetime.utcnow() - timedelta(days=days)
+    since = utcnow() - timedelta(days=days)
     entries = db.exec(
         select(LogEntry)
         .where(LogEntry.user_id == user_id, LogEntry.created_at >= since)
-        .order_by(LogEntry.created_at)  # type: ignore[arg-type]
+        .order_by(LogEntry.created_at)# ty:ignore[invalid-argument-type]
     ).all()
 
     total_calls = len(entries)

@@ -36,7 +36,8 @@ llm-stats-dashboard/
 ├── plans/               # Design/implementation plans (one .md per feature)
 │   ├── PLAN.md          # Original project plan
 │   ├── PROXY_PLAN.md    # Proxy subsystem design
-│   └── CONVERSATIONS_PAGE_PLAN.md
+│   ├── CONVERSATIONS_PAGE_PLAN.md
+│   └── PLUGIN_TOGGLE_AND_WORDCOUNT_PLAN.md
 ├── docs/                # Markdown docs served by the API + rendered in /docs UI
 ├── scripts/             # db-create.sh, db-reset.sh helpers
 ├── backend/             # FastAPI + SQLModel + Postgres
@@ -64,6 +65,14 @@ backend/
 │   ├── logging_config.py    # Logging setup (file + console)
 │   ├── docs_loader.py       # Loads docs/ Markdown for the docs API
 │   ├── models/              # SQLModel table definitions
+│   │   ├── api_key.py
+│   │   ├── log_entry.py
+│   │   ├── message.py
+│   │   ├── message_modification.py
+│   │   ├── model_price.py
+│   │   ├── plugin_config.py
+│   │   ├── session.py
+│   │   └── user.py
 │   ├── schemas/             # Pydantic request/response schemas
 │   ├── routers/             # API endpoints (one module per resource)
 │   ├── services/            # Business logic (ingest, cost, stats, dedup, mapping)
@@ -86,11 +95,19 @@ backend/
 | `LogEntry` | `log_entries` | One LLM call. Stores provider/model, usage, cost, status, `conversation_id`, `message_ids` (ARRAY), `parent_entry_id` (conversation tree) |
 | `Message` | `messages` | Deduplicated/interned messages (content-hashed), referenced by `LogEntry.message_ids` |
 | `ModelPrice` | `model_prices` | Per-model pricing for cost computation |
+| `PluginConfig` | `plugin_config` | Per-user global plugin enable/disable state |
+| `PluginConfigConversation` | `plugin_config_conversation` | Per-conversation plugin override (beats global) |
+| `MessageModification` | `message_modifications` | (Legacy) Plugin mutations to request/response messages. Superseded by `message_diffs`. |
+| `MessageDiff` | `message_diffs` | Per-message original→final content diffs from proxy transforms (replaces `message_modifications`). |
 
 Key design point: messages are **interned/deduplicated**. A `LogEntry` does not store
 its messages inline — it stores an ordered list of `message_ids` pointing at the
 `messages` table. `parent_entry_id` reconstructs the conversation tree (enabling
 branching/retry detection in the transcript view).
+
+The canonical history stores **original** (pre-transform) messages — plugin transforms
+are tracked as diffs in `message_diffs`, which function as an overlay. This keeps the
+conversation tree stable across plugin toggles.
 
 ### 3.3 Routers (`app/routers/`) — all mounted under `/api/v1` (except health)
 
@@ -103,6 +120,7 @@ branching/retry detection in the transcript view).
 | `logs.py` | (none, mounted at prefix) | `POST /logs`, `GET /logs`, `GET /logs/{id}`, `GET /conversations/{id}`, `GET /conversations/{id}/transcript`, `GET /stats/summary` |
 | `docs_router.py` | `/docs-md` | `GET` list docs, `GET /{path}` raw Markdown (**public, no auth**) |
 | `proxy.py` | (none, mounted at prefix) | `POST /chat/completions`, `POST /completions`, `GET /models`, `GET /proxy/health` |
+| `plugins.py` | `/plugins` | Plugin toggles: per-user global (`GET/PUT /plugins`, `PUT /plugins/{name}`) + per-conversation overrides (`GET/PUT/DELETE /conversations/{id}/plugins/{name}`) |
 
 OpenAPI: `/api/openapi.json`; Swagger `/api/docs`; ReDoc `/api/redoc`.
 
@@ -111,10 +129,12 @@ OpenAPI: `/api/openapi.json`; Swagger `/api/docs`; ReDoc `/api/redoc`.
 | File | Responsibility |
 |------|----------------|
 | `ingest.py` | `ingest_log_entry()` — validate, intern messages, resolve cost + parent, persist a `LogEntry` |
-| `messages.py` | Message interning/dedup: `content_hash`, `intern_messages`, `rehydrate_messages`, `batch_rehydrate_messages`, `resolve_parent_entry_id` |
+| `messages.py` | Message interning/dedup: `content_hash`, `intern_messages`, `rehydrate_messages`, `batch_rehydrate_messages`, `resolve_parent_entry_id`. Canonical history stores **original** (pre-transform) messages; diffs are an overlay. |
 | `cost.py` | `resolve_cost()` — use client-supplied cost or compute from `model_prices` |
 | `stats.py` | `get_stats()` — aggregates for the dashboard (totals, by-day, by-model) |
-| `openrouter_map.py` | Maps OpenRouter responses → canonical `LogEntryCreate`; `derive_conversation_id`, `map_to_log_entry`, `map_error_to_log_entry` |
+| `openrouter_map.py` | Maps OpenRouter responses → canonical `LogEntryCreate`; `derive_conversation_id`, `candidate_conversation_id` (pre-call, no-DB), `map_to_log_entry`, `map_error_to_log_entry` |
+| `modifications.py` | `persist_modifications` — (Legacy) writes `RecordedModification` entries to the `message_modifications` table |
+| `diffs.py` | `persist_diffs`, `batch_fetch_diffs` — persists `MessageDiff` rows from the interceptor to the `message_diffs` table |
 
 ### 3.5 Security (`app/security/`)
 
@@ -142,21 +162,22 @@ Transparent OpenRouter passthrough that logs calls automatically. See
 | `upstream.py` | `forward_non_stream` / `forward_stream` to OpenRouter via httpx; header building + hop-by-hop stripping |
 | `context.py` | `ProxyContext` — per-request state passed through the pipeline |
 | `pipeline.py` | `PluginPipeline` — runs ordered plugins around the upstream call |
-| `registry.py` | Builds the plugin list from `PROXY_PLUGINS` env (comma-separated, ordered) |
+| `registry.py` | Maps plugin names → classes; `resolve_pipeline(user_id, conversation_id, db)` builds per-request pipelines with toggle support; legacy `get_pipeline()` singleton |
 | `assembler.py` | `StreamAssembler` — reconstructs a full response from SSE chunks (so streamed calls can be logged) |
-| `plugins/base.py` | `BasePlugin` interface (request/response/stream hooks) |
-| `plugins/logging.py` | `LoggingPlugin` — persists a `LogEntry` after the call |
-| `plugins/compression.py` | `CompressionPlugin` |
+| `plugins/base.py` | `BasePlugin` interface (request/response/response_sync/stream hooks) |
+| `plugins/logging.py` | `LoggingPlugin` — persists a `LogEntry` + `MessageModification` rows after the call |
+| `plugins/compression.py` | `CompressionPlugin` — Headroom-backed request compression; reduces token usage before forwarding |
+| `plugins/word_count.py` | `WordCountPlugin` — sample plugin: appends word-count markers to messages, records modifications |
 
-Flow: client → `/api/v1/chat/completions` → pipeline (pre-hooks) → forward to OpenRouter
-→ (stream assembled if needed) → pipeline (post-hooks, incl. logging) → response to client.
+Flow: client → `/api/v1/chat/completions` → `resolve_pipeline` (per-user/per-conv) → pre-hooks → forward to OpenRouter
+→ (stream assembled if needed) → `on_response_sync` (mutate client-visible body) → `on_response` (logging) → response to client.
 
 ### 3.7 Config (`app/config.py` ← `.env`)
 
 Key env vars (see `.env.example`): `DATABASE_URL`, `TEST_DATABASE_URL`, `SECRET_KEY`,
 `SESSION_MAX_AGE_SECONDS`, `ALLOWED_ORIGINS`, `MAX_LOG_BODY_BYTES`, `LOG_LEVEL`,
 `LOG_FILE`, and proxy vars (`OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`,
-`PROXY_PLUGINS`, timeouts).
+`PROXY_PLUGINS`, timeouts, compression settings).
 
 ### 3.8 Migrations
 
@@ -260,6 +281,9 @@ Backend: FastAPI on `:8000`. Frontend: Vite on `:5173`.
 | Business logic | `backend/app/services/` |
 | Auth / scopes / CSRF | `backend/app/security/` |
 | Proxy behavior / plugins | `backend/app/proxy/` |
+| Plugin toggles (API) | `backend/app/routers/plugins.py` |
+| Plugin toggles (UI) | `frontend/src/routes/settings.tsx` (global), `frontend/src/routes/conversation.tsx` (per-conversation) |
+| Plugin modifications / badges | `backend/app/models/message_modification.py`, `frontend/src/components/ModificationBadge.tsx` |
 | A dashboard page | `frontend/src/routes/` |
 | Nav / shared UI | `frontend/src/components/` |
 | API client / TS types | `frontend/src/lib/api.ts` |

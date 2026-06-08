@@ -1,9 +1,11 @@
 """Tests for proxy module components."""
 
+import uuid as _uuid
+
 from app.models.log_entry import LogEntry
 from app.proxy.assembler import StreamAssembler
 from app.proxy.context import ProxyContext
-from app.services.openrouter_map import derive_conversation_id, map_to_log_entry
+from app.services.openrouter_map import map_to_log_entry
 
 # ---------------------------------------------------------------------------
 # StreamAssembler tests
@@ -272,141 +274,279 @@ class TestStreamAssembler:
 # ---------------------------------------------------------------------------
 
 
-class TestDeriveConversationId:
+class TestConversationIdentity:
+    """Conversation identity inference via chain-key prefix matching."""
+
+    # -- explicit / user-field precedence (unchanged) --
+
     def test_explicit_header_wins(self):
-        cid = derive_conversation_id(
-            {"messages": [{"role": "user", "content": "hi"}]},
-            "lsd_abc",
+        from app.services.conversation_identity import infer_conversation_id
+
+        cid, ck, _ = infer_conversation_id(
+            [{"role": "user", "content": "hi"}],
+            _uuid.uuid4(),
+            None,  # type: ignore[arg-type]
             explicit="my-custom-id",
         )
         assert cid == "my-custom-id"
+        assert ck.chain_key is not None
 
     def test_user_field(self):
-        cid = derive_conversation_id(
-            {"user": "bob", "messages": [{"role": "user", "content": "hi"}]},
-            "lsd_abc",
+        from app.services.conversation_identity import infer_conversation_id
+
+        cid, ck, _ = infer_conversation_id(
+            [{"role": "user", "content": "hi"}],
+            _uuid.uuid4(),
+            None,  # type: ignore[arg-type]
+            user_field="bob",
         )
         assert cid == "or-user-bob"
+        assert ck.chain_key is not None
 
-    def test_fallback_mints_unique_ids(self):
-        """Without DB context, each call gets a fresh UUID — no merging."""
-        body = {
-            "messages": [
-                {"role": "system", "content": "You are helpful."},
-                {"role": "user", "content": "Hello"},
-            ]
-        }
-        cid1 = derive_conversation_id(body, "lsd_abc")
-        cid2 = derive_conversation_id(body, "lsd_abc")
-        assert cid1 != cid2, "Each call without DB context must get a unique id"
-        assert cid1.startswith("or-")
-        assert cid2.startswith("or-")
+    # -- chain-key prefix matching --
 
-    def test_different_keys_never_share_buckets(self):
-        body = {
-            "messages": [{"role": "user", "content": "hi"}],
-        }
-        cid_a = derive_conversation_id(body, "lsd_aaa")
-        cid_b = derive_conversation_id(body, "lsd_bbb")
-        assert cid_a != cid_b
-
-    def test_empty_messages_fallback(self):
-        cid = derive_conversation_id({"messages": []}, "lsd_abc")
-        assert cid.startswith("or-")
-
-    def test_with_db_prefix_chain_inherits_conversation(self, pg_engine):
-        """Turn 2 extending turn 1's messages gets the same conversation_id."""
-        import uuid as _uuid
-
+    def test_continuing_turn_chains(self, pg_engine):
+        """Turn 2 chains to turn 1 via chain_key prefix."""
         from sqlmodel import Session
+
+        from app.services.conversation_identity import (
+            compute_chain_keys,
+            infer_conversation_id,
+        )
 
         with Session(pg_engine) as db:
             from app.models.user import User
             from app.security.passwords import hash_password
 
             uid = _uuid.uuid4()
-            db.add(User(id=uid, username="pc_user", password_hash=hash_password("x")))
+            db.add(User(id=uid, username="ci_user", password_hash=hash_password("x")))
             db.flush()
 
-            from app.services.messages import intern_messages
-
-            # Turn 1: [user msg]
-            msgs1 = [{"role": "user", "content": "Hello"}]
-            ids1 = intern_messages(msgs1, uid, db)
-
+            # Turn 1: store entry with its chain_key.
+            t1 = [
+                {"role": "system", "content": "Be helpful."},
+                {"role": "user", "content": "Hello"},
+            ]
+            ck1 = compute_chain_keys(t1)
             entry1 = LogEntry(
                 id=_uuid.uuid4(),
                 user_id=uid,
-                conversation_id="or-abc123",
-                message_ids=ids1,
+                conversation_id="or-chain-test",
+                chain_key=ck1.chain_key,
+                chain_prefix_key=ck1.chain_prefix_key,
                 provider="openrouter",
                 model="gpt-4o",
                 request={"params": {}},
                 response={"message": {"role": "assistant", "content": "Hi"}},
+                message_ids=[],
             )
             db.add(entry1)
             db.flush()
 
-            # Turn 2: [user msg, assistant msg, new user msg]
-            msgs2 = [
+            # Turn 2: system + user1 + assistant1 + user2.
+            t2 = [
+                {"role": "system", "content": "Be helpful."},
                 {"role": "user", "content": "Hello"},
                 {"role": "assistant", "content": "Hi"},
                 {"role": "user", "content": "How are you?"},
             ]
-            ids2 = intern_messages(msgs2, uid, db)
+            cid2, ck2, matched = infer_conversation_id(t2, uid, db)
+            assert cid2 == "or-chain-test", "Turn 2 must chain to turn 1"
+            assert matched == entry1.id
 
-            cid = derive_conversation_id(
-                {"messages": msgs2},
-                "lsd_abc",
-                message_ids=ids2,
-                user_id=uid,
-                db=db,
-            )
-            assert cid == "or-abc123", "Turn 2 must inherit turn 1's conversation_id"
-
-    def test_with_db_equal_length_not_a_prefix(self, pg_engine):
-        """Retry of first message (same length) does NOT chain — new conversation."""
-        import uuid as _uuid
-
+    def test_normalization_ignores_reasoning_extras(self, pg_engine):
+        """Stored asst msg has reasoning, resent asst msg is {role,content} only
+        — same turn_key, so turn 2 chains.  This directly reproduces the
+        regression caused by the prior response-interning fix."""
         from sqlmodel import Session
+
+        from app.services.conversation_identity import compute_chain_keys, infer_conversation_id
 
         with Session(pg_engine) as db:
             from app.models.user import User
             from app.security.passwords import hash_password
 
             uid = _uuid.uuid4()
-            db.add(User(id=uid, username="pc_user2", password_hash=hash_password("x")))
+            db.add(User(id=uid, username="ci_norm", password_hash=hash_password("x")))
             db.flush()
 
-            from app.services.messages import intern_messages
-
-            msgs1 = [{"role": "user", "content": "Hello"}]
-            ids1 = intern_messages(msgs1, uid, db)
-
-            entry1 = LogEntry(
-                id=_uuid.uuid4(),
-                user_id=uid,
-                conversation_id="or-abc123",
-                message_ids=ids1,
-                provider="openrouter",
-                model="gpt-4o",
-                request={"params": {}},
-                response={"message": {"role": "assistant", "content": "Hi"}},
+            # Turn 1: assistant reply includes reasoning + provider extras.
+            t1 = [
+                {"role": "system", "content": "Be concise."},
+                {"role": "user", "content": "What is 2+2?"},
+                {
+                    "role": "assistant",
+                    "content": "4",
+                    "reasoning": "Let me add: 2+2=4.",
+                    "reasoning_details": [{"type": "reasoning.text", "text": "2+2=4"}],
+                    "provider_extra": "ignored field",
+                },
+            ]
+            ck1 = compute_chain_keys(t1)
+            db.add(
+                LogEntry(
+                    id=_uuid.uuid4(),
+                    user_id=uid,
+                    conversation_id="or-norm-test",
+                    chain_key=ck1.chain_key,
+                    chain_prefix_key=ck1.chain_prefix_key,
+                    provider="openrouter",
+                    model="gpt-4o",
+                    request={"params": {}},
+                    response={"message": {"role": "assistant", "content": "4"}},
+                    message_ids=[],
+                )
             )
-            db.add(entry1)
             db.flush()
 
-            # Same message — equal length, not a *proper* prefix
-            ids2 = intern_messages(msgs1, uid, db)
-            cid = derive_conversation_id(
-                {"messages": msgs1},
-                "lsd_abc",
-                message_ids=ids2,
-                user_id=uid,
-                db=db,
+            # Turn 2: client resends stripped assistant (no reasoning, no extras).
+            t2 = [
+                {"role": "system", "content": "Be concise."},
+                {"role": "user", "content": "What is 2+2?"},
+                {"role": "assistant", "content": "4"},  # stripped
+                {"role": "user", "content": "Why?"},
+            ]
+            cid2, _, _ = infer_conversation_id(t2, uid, db)
+            assert cid2 == "or-norm-test", (
+                "Stripped assistant reply must still chain — normalization "
+                "drops reasoning/extras so turn keys match"
             )
-            assert cid != "or-abc123", "Equal-length retry must NOT chain — it's a new conversation"
-            assert cid.startswith("or-")
+
+    def test_tool_call_normalization(self, pg_engine):
+        """Tool-call arguments as JSON-string vs dict produce the same turn_key."""
+        from sqlmodel import Session
+
+        from app.services.conversation_identity import turn_key
+
+        with Session(pg_engine) as db:
+            from app.models.user import User
+            from app.security.passwords import hash_password
+
+            uid = _uuid.uuid4()
+            db.add(User(id=uid, username="ci_tool", password_hash=hash_password("x")))
+            db.flush()
+
+            tk_string = turn_key(
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "function": {"name": "search", "arguments": '{"q":"hello"}'},
+                        }
+                    ],
+                }
+            )
+            tk_dict = turn_key(
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "function": {"name": "search", "arguments": {"q": "hello"}},
+                        }
+                    ],
+                }
+            )
+            assert tk_string == tk_dict, (
+                "Tool-call args as JSON-string vs dict must produce same turn_key"
+            )
+
+    def test_unrelated_thread_no_match(self, pg_engine):
+        """Different first message (system prompt) → no match."""
+        from sqlmodel import Session
+
+        from app.services.conversation_identity import compute_chain_keys, infer_conversation_id
+
+        with Session(pg_engine) as db:
+            from app.models.user import User
+            from app.security.passwords import hash_password
+
+            uid = _uuid.uuid4()
+            db.add(User(id=uid, username="ci_unrel", password_hash=hash_password("x")))
+            db.flush()
+
+            t1 = [
+                {"role": "system", "content": "You are a pirate."},
+                {"role": "user", "content": "Ahoy"},
+            ]
+            ck1 = compute_chain_keys(t1)
+            db.add(
+                LogEntry(
+                    id=_uuid.uuid4(),
+                    user_id=uid,
+                    conversation_id="or-pirate",
+                    chain_key=ck1.chain_key,
+                    chain_prefix_key=ck1.chain_prefix_key,
+                    provider="openrouter",
+                    model="gpt-4o",
+                    request={"params": {}},
+                    response={"message": {"role": "assistant", "content": "Arr!"}},
+                    message_ids=[],
+                )
+            )
+            db.flush()
+
+            t2 = [
+                {"role": "system", "content": "You are helpful."},  # different
+                {"role": "user", "content": "Hello"},
+            ]
+            cid2, _, matched = infer_conversation_id(t2, uid, db)
+            assert cid2 != "or-pirate", "Unrelated thread must NOT match"
+            assert matched is None
+
+    def test_retry_same_history_no_match(self, pg_engine):
+        """A retry of the exact same request history starts a new conversation,
+        not a continuation of the previous turn."""
+        from sqlmodel import Session
+
+        from app.services.conversation_identity import compute_chain_keys, infer_conversation_id
+
+        with Session(pg_engine) as db:
+            from app.models.user import User
+            from app.security.passwords import hash_password
+
+            uid = _uuid.uuid4()
+            db.add(User(id=uid, username="ci_retry", password_hash=hash_password("x")))
+            db.flush()
+
+            t1 = [
+                {"role": "user", "content": "Hello"},
+            ]
+            ck1 = compute_chain_keys(t1)
+            db.add(
+                LogEntry(
+                    id=_uuid.uuid4(),
+                    user_id=uid,
+                    conversation_id="or-first",
+                    chain_key=ck1.chain_key,
+                    chain_prefix_key=ck1.chain_prefix_key,
+                    provider="openrouter",
+                    model="gpt-4o",
+                    request={"params": {}},
+                    response={"message": {"role": "assistant", "content": "Hi"}},
+                    message_ids=[],
+                )
+            )
+            db.flush()
+
+            # Same exact request — proper prefix requires len(candidate) < len(turn_keys)
+            cid2, _, matched = infer_conversation_id(t1, uid, db)
+            assert cid2 != "or-first", "Retry of identical history must NOT chain"
+            assert matched is None
+
+    def test_new_thread_no_match(self):
+        """Brand-new thread with no prior entries returns a fresh id."""
+        from app.services.conversation_identity import infer_conversation_id
+
+        cid, ck, matched = infer_conversation_id(
+            [{"role": "user", "content": "Hello"}],
+            _uuid.uuid4(),
+            None,  # type: ignore[arg-type]
+        )
+        assert cid.startswith("or-")
+        assert matched is None
+        assert ck.chain_key is not None
 
 
 # ---------------------------------------------------------------------------
@@ -533,6 +673,81 @@ class TestMapToLogEntry:
         assert len(entry.tool_calls) == 1
         assert entry.tool_calls[0].name == "get_weather"
         assert entry.tool_calls[0].id == "call_abc"
+
+    def test_logs_original_request_not_mutated(self):
+        """Logged messages use the ORIGINAL (pre-interceptor) messages.
+
+        When ctx.original_request_messages is set (the production path),
+        map_to_log_entry interns the original content — not the
+        post-transform messages sent upstream.
+        """
+        user, api_key = self._make_user_key()
+        # Final messages (post-interceptor with word_count applied).
+        final_body = {
+            "model": "gpt-4o",
+            "messages": [
+                {"role": "user", "content": "Hello world\n\n[word_count: 2]"}
+            ],
+        }
+        original_messages = [
+            {"role": "user", "content": "Hello world"}
+        ]
+
+        ctx = ProxyContext(
+            user=user,
+            api_key=api_key,
+            request_body=final_body,
+            request_headers={},
+            model="gpt-4o",
+            is_stream=False,
+            original_request_messages=original_messages,
+        )
+        upstream = {
+            "id": "chatcmpl-wc",
+            "choices": [
+                {"message": {"role": "assistant", "content": "Hi"}, "finish_reason": "stop"}
+            ],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+        }
+
+        entry = map_to_log_entry(ctx, upstream)
+        # The logged request content is the ORIGINAL (pre-interceptor) content.
+        assert "Hello world" in entry.request.messages[0].content
+        assert "[word_count: 2]" not in entry.request.messages[0].content
+
+    def test_falls_back_to_request_body_when_snapshot_is_none(self):
+        """When original_request_messages is None, fall back to request_body."""
+        user, api_key = self._make_user_key()
+        final_body = {
+            "model": "gpt-4o",
+            "messages": [
+                {"role": "user", "content": "Fallback message"}
+            ],
+        }
+
+        ctx = ProxyContext(
+            user=user,
+            api_key=api_key,
+            request_body=final_body,
+            request_headers={},
+            model="gpt-4o",
+            is_stream=False,
+            original_request_messages=None,
+        )
+        upstream = {
+            "id": "chatcmpl-fb2",
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "Fallback response"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+        entry = map_to_log_entry(ctx, upstream)
+        assert entry.request.messages[0].content == "Fallback message"
+        assert entry.response.message.content == "Fallback response"
 
     def test_developer_role_accepted_verbatim(self):
         user, api_key = self._make_user_key()

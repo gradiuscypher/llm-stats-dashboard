@@ -2,7 +2,7 @@
 
 import secrets
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlmodel import Session
@@ -11,6 +11,7 @@ from app.config import settings
 from app.db import get_session
 from app.models.session import UserSession
 from app.models.user import User
+from app.utils.time import utcnow
 
 SESSION_COOKIE = "lsd_session"
 
@@ -21,7 +22,7 @@ def create_session(user_id: uuid.UUID, db: Session) -> tuple[str, str]:
     The session_id is stored in a signed httpOnly cookie.
     """
     csrf_secret = secrets.token_hex(32)
-    now = datetime.utcnow()
+    now = utcnow()
     expires = now + timedelta(seconds=settings.session_max_age_seconds)
     session = UserSession(
         user_id=user_id,
@@ -61,7 +62,7 @@ def get_current_user(
         ) from exc
 
     sess = db.get(UserSession, sid)
-    if not sess or sess.revoked or sess.expires_at < datetime.utcnow():
+    if not sess or sess.revoked or sess.expires_at < utcnow():
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired or invalid"
         )

@@ -41,7 +41,7 @@ def list_keys(
     db: Session = Depends(get_session),
 ) -> list[ApiKey]:
     """List all API keys for the current user (never returns raw secrets)."""
-    return db.exec(select(ApiKey).where(ApiKey.user_id == current_user.id)).all()  # type: ignore[return-value]
+    return list(db.exec(select(ApiKey).where(ApiKey.user_id == current_user.id)).all())
 
 
 @router.post("", response_model=ApiKeyCreatedResponse, status_code=status.HTTP_201_CREATED)
@@ -101,8 +101,8 @@ def revoke_key(
     if not key or key.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API key not found")
 
-    from datetime import datetime
+    from app.utils.time import utcnow
 
-    key.revoked_at = datetime.utcnow()
+    key.revoked_at = utcnow()
     db.add(key)
     db.commit()

@@ -1,10 +1,13 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { logsApi } from "@/lib/api";
+import { logsApi, ModificationPublic, MessageDiffPublic } from "@/lib/api";
 import { Layout } from "@/components/Layout";
 import { PageHeader } from "@/components/PageHeader";
 import { StatusBadge } from "@/components/StatusBadge";
+import { ModificationBadge } from "@/components/ModificationBadge";
+import { MessageDiff } from "@/components/MessageDiff";
+import { useShowDiff } from "@/lib/useShowDiff";
 import { Button } from "@/components/Button";
 
 interface LogDetailPageProps {
@@ -20,6 +23,19 @@ const roleBg: Record<MessageRole, string> = {
   tool: "bg-[var(--color-code-bg)]",
 };
 
+function contentText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((p) => {
+        if (typeof p === "object" && p !== null && "text" in p) return (p as { text: string }).text;
+        return JSON.stringify(p);
+      })
+      .join("\n");
+  }
+  return JSON.stringify(content, null, 2);
+}
+
 function MessageBlock({
   role,
   content,
@@ -31,7 +47,6 @@ function MessageBlock({
   reasoning?: string;
   reasoningDetails?: unknown[];
 }) {
-  const text = typeof content === "string" ? content : JSON.stringify(content, null, 2);
   const hasReasoning = reasoning && reasoning.trim().length > 0;
   const hasDetails = Array.isArray(reasoningDetails) && reasoningDetails.length > 0;
 
@@ -71,14 +86,65 @@ function MessageBlock({
         </details>
       )}
       <pre className="whitespace-pre-wrap text-sm leading-relaxed bg-transparent border-none p-0">
-        {text}
+        {contentText(content)}
       </pre>
+    </div>
+  );
+}
+
+function DiffRow({ diff }: { diff: MessageDiffPublic }) {
+  if (diff.change_kind !== "modified") return null;
+  const origText =
+    diff.original_content && typeof diff.original_content.content === "string"
+      ? diff.original_content.content
+      : JSON.stringify(diff.original_content);
+  const finalText =
+    diff.final_content && typeof diff.final_content.content === "string"
+      ? diff.final_content.content
+      : JSON.stringify(diff.final_content);
+
+  return (
+    <MessageDiff
+      original={origText}
+      final={finalText}
+      modifiedBy={diff.modified_by}
+      className="mb-2"
+    />
+  );
+}
+
+function ModRow({ mod }: { mod: ModificationPublic }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="border border-[var(--color-border)] mb-2 last:mb-0">
+      <div
+        className="flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-[var(--color-bg-alt)]"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <span className="text-[10px]">{expanded ? "▾" : "▸"}</span>
+        <span className="text-xs font-bold uppercase tracking-wider text-[var(--color-accent)]">
+          {mod.plugin_name}
+        </span>
+        <span className="text-xs text-[var(--color-text-faint)]">{mod.target}</span>
+        {mod.message_role && (
+          <span className="text-xs text-[var(--color-text-faint)]">· {mod.message_role}</span>
+        )}
+        <span className="flex-1" />
+        <span className="text-xs text-[var(--color-text-muted)]">{mod.summary}</span>
+      </div>
+      {expanded && mod.detail && (
+        <pre className="px-3 pb-2 text-[10px] whitespace-pre-wrap text-[var(--color-text-muted)]">
+          {JSON.stringify(mod.detail, null, 2)}
+        </pre>
+      )}
     </div>
   );
 }
 
 export function LogDetailPage({ logId }: LogDetailPageProps) {
   const [showRaw, setShowRaw] = useState(false);
+  const [showDiff, setShowDiff] = useShowDiff();
   const { data: log, isLoading } = useQuery({
     queryKey: ["log", logId],
     queryFn: () => logsApi.get(logId),
@@ -163,6 +229,25 @@ export function LogDetailPage({ logId }: LogDetailPageProps) {
           ["Completion tokens", log.completion_tokens.toLocaleString()],
           ["Reasoning tokens", log.reasoning_tokens?.toLocaleString() ?? "0"],
           ["Cost", log.cost_total != null ? `$${log.cost_total.toFixed(6)}` : "—"],
+          ...(log.metadata_extra?.compression
+            ? [
+                [
+                  "Tokens Saved by Compression",
+                  <span key="comp">
+                    {log.metadata_extra.compression.tokens_saved.toLocaleString()}{" "}
+                    <span className="text-[var(--color-text-faint)]">
+                      ({(log.metadata_extra.compression.compression_ratio * 100).toFixed(0)}%)
+                    </span>
+                  </span>,
+                ],
+                [
+                  "Compression Transforms",
+                  <span key="trans" className="text-xs text-[var(--color-accent)]">
+                    {log.metadata_extra.compression.transforms_applied.join(", ")}
+                  </span>,
+                ],
+              ]
+            : []),
         ].map(([label, value]) => (
           <div
             key={String(label)}
@@ -186,6 +271,53 @@ export function LogDetailPage({ logId }: LogDetailPageProps) {
           >
             {log.conversation_id}
           </Link>
+        </div>
+      )}
+
+      {/* Modifications (legacy) */}
+      {log.modifications && log.modifications.length > 0 && (
+        <div className="mb-4 border border-[var(--color-border)] bg-[var(--color-surface)]">
+          <div className="px-4 py-2 border-b border-[var(--color-border)] flex items-center gap-2">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
+              Modifications (legacy)
+            </h2>
+            <ModificationBadge count={log.modifications.length} size="sm" />
+          </div>
+          <div className="p-4">
+            {log.modifications.map((mod) => (
+              <ModRow key={mod.id} mod={mod} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Request Diffs */}
+      {log.request_diffs && log.request_diffs.length > 0 && (
+        <div className="mb-4 border border-[var(--color-border)] bg-[var(--color-surface)]">
+          <div className="px-4 py-2 border-b border-[var(--color-border)] flex items-center gap-2">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
+              Request Diffs
+            </h2>
+            <ModificationBadge count={log.request_diffs.length} size="sm" />
+            <button
+              onClick={() => setShowDiff(!showDiff)}
+              className={`ml-auto px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider
+                border cursor-pointer transition-colors bg-transparent ${
+                  showDiff
+                    ? "border-[var(--color-accent)] text-[var(--color-accent)]"
+                    : "border-[var(--color-border)] text-[var(--color-text-faint)]"
+                }`}
+            >
+              {showDiff ? "Diffs ON" : "Diffs OFF"}
+            </button>
+          </div>
+          {showDiff && (
+            <div className="p-4">
+              {log.request_diffs.map((diff) => (
+                <DiffRow key={diff.id} diff={diff} />
+              ))}
+            </div>
+          )}
         </div>
       )}
 

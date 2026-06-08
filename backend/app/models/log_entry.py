@@ -8,6 +8,8 @@ from sqlalchemy import Index
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlmodel import Column, Field, SQLModel
 
+from app.utils.time import utcnow
+
 
 class LogEntry(SQLModel, table=True):
     __tablename__ = "log_entries"
@@ -24,8 +26,16 @@ class LogEntry(SQLModel, table=True):
     # Which API key made this call (nullable — old rows / non-key paths may not have one)
     api_key_id: uuid.UUID | None = Field(default=None, foreign_key="api_keys.id", index=True)
 
-    # Conversation grouping (client-supplied)
+    # Conversation grouping — inferred from request structure by default;
+    # explicit X-Conversation-Id / OpenRouter user field overrides.
     conversation_id: str | None = Field(default=None, index=True, max_length=256)
+
+    # Chain key for request-prefix-based conversation identity (see plans/).
+    # sha256 hex over all turn_keys of this entry's request.
+    # Indexed with user_id so future turns probe it as a prefix in O(1).
+    chain_key: str | None = Field(default=None, max_length=64)
+    # Chain key up to the last user anchor (for retry / branch matching).
+    chain_prefix_key: str | None = Field(default=None, max_length=64)
 
     # Ordered list of interned message UUIDs for the request (deduped across calls).
     # Stored as a Postgres ARRAY so order is native; add GIN index later if reverse
@@ -71,4 +81,4 @@ class LogEntry(SQLModel, table=True):
 
     # Timestamps
     client_timestamp: datetime | None = Field(default=None)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)

@@ -39,8 +39,12 @@ def get_csrf_token(
 
     get_current_user(request, db)  # validates session
     raw_sid = request.cookies.get(SESSION_COOKIE)
-    sess = db.get(_UserSession, _uuid.UUID(raw_sid))  # type: ignore[arg-type]
-    token = generate_csrf_token(sess.csrf_secret)  # type: ignore[union-attr]
+    if not raw_sid:
+        raise HTTPException(status_code=401, detail="No active session")
+    sess = db.get(_UserSession, _uuid.UUID(raw_sid))
+    if sess is None:
+        raise HTTPException(status_code=401, detail="No active session")
+    token = generate_csrf_token(sess.csrf_secret)
     response.set_cookie(CSRF_COOKIE, token, samesite="lax", httponly=False)
     return {"csrf_token": token}
 

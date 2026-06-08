@@ -2,6 +2,9 @@ import { Layout } from "@/components/Layout";
 import { PageHeader } from "@/components/PageHeader";
 import { useTheme, ThemePreference } from "@/lib/useTheme";
 import { useFontSize, FontSizePreference, FONT_SIZE_LABELS } from "@/lib/useFontSize";
+import { useShowDiff } from "@/lib/useShowDiff";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { pluginsApi } from "@/lib/api";
 
 // ─── Reusable option button ──────────────────────────────────────────────────
 
@@ -72,6 +75,21 @@ const FONT_SIZE_OPTIONS: { value: FontSizePreference }[] = [
 export function SettingsPage() {
   const { preference: theme, setPreference: setTheme } = useTheme();
   const { preference: fontSize, setPreference: setFontSize } = useFontSize();
+  const [showDiff, setShowDiff] = useShowDiff();
+  const queryClient = useQueryClient();
+
+  const { data: plugins = [], isLoading: pluginsLoading } = useQuery({
+    queryKey: ["plugins"],
+    queryFn: pluginsApi.list,
+  });
+
+  const toggleMutation = useMutation({
+    mutationFn: ({ name, enabled }: { name: string; enabled: boolean }) =>
+      pluginsApi.setGlobal(name, enabled),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["plugins"] });
+    },
+  });
 
   return (
     <Layout>
@@ -124,6 +142,109 @@ export function SettingsPage() {
             model: gpt-4o &nbsp;|&nbsp; tokens: 1,234 &nbsp;|&nbsp; cost: $0.003456
           </p>
         </div>
+      </Section>
+
+      {/* Request Diffs */}
+      <Section
+        title="Show Request Diffs"
+        description="When enabled, transcripts and log details show original vs transformed content for messages modified by proxy plugins."
+      >
+        <OptionButton active={showDiff} onClick={() => setShowDiff(!showDiff)}>
+          {showDiff ? "ON" : "OFF"}
+        </OptionButton>
+      </Section>
+
+      {/* Proxy Plugins */}
+      <Section
+        title="Proxy Plugins"
+        description="Enable or disable proxy plugins. Changes apply to all future conversations unless overridden per-conversation."
+      >
+        {pluginsLoading ? (
+          <p className="text-xs text-[var(--color-text-faint)]">Loading…</p>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {plugins.map((plugin) => (
+              <div
+                key={plugin.name}
+                className="flex items-center justify-between border border-[var(--color-border)] p-3"
+              >
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-[var(--color-text)]">
+                      {plugin.name}
+                    </span>
+                    {plugin.default_enabled && (
+                      <span className="text-[9px] text-[var(--color-text-faint)] border border-[var(--color-border)] px-1">
+                        DEFAULT
+                      </span>
+                    )}
+                    {plugin.locked && (
+                      <span className="text-[9px] text-[var(--color-accent)] border border-[var(--color-accent)] px-1">
+                        LOCKED
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                    {plugin.description}
+                  </p>
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer ml-3">
+                  {plugin.locked ? (
+                    <span className="w-9 h-5 rounded-full bg-[var(--color-accent)] relative cursor-not-allowed">
+                      <span className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white block" />
+                    </span>
+                  ) : (
+                    <>
+                      <input
+                        type="checkbox"
+                        className="sr-only"
+                        checked={
+                          plugin.user_enabled !== null
+                            ? plugin.user_enabled
+                            : plugin.default_enabled
+                        }
+                        onChange={(e) =>
+                          toggleMutation.mutate({
+                            name: plugin.name,
+                            enabled: e.target.checked,
+                          })
+                        }
+                      />
+                      <span
+                        className={`w-9 h-5 rounded-full relative transition-colors ${
+                          (
+                            plugin.user_enabled !== null
+                              ? plugin.user_enabled
+                              : plugin.default_enabled
+                          )
+                            ? "bg-[var(--color-accent)]"
+                            : "bg-[var(--color-border)]"
+                        }`}
+                      >
+                        <span
+                          className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                            (
+                              plugin.user_enabled !== null
+                                ? plugin.user_enabled
+                                : plugin.default_enabled
+                            )
+                              ? "left-[calc(100%-1.125rem)]"
+                              : "left-0.5"
+                          }`}
+                        />
+                      </span>
+                    </>
+                  )}
+                  <span className="text-xs text-[var(--color-text-muted)]">
+                    {(plugin.user_enabled !== null ? plugin.user_enabled : plugin.default_enabled)
+                      ? "On"
+                      : "Off"}
+                  </span>
+                </label>
+              </div>
+            ))}
+          </div>
+        )}
       </Section>
     </Layout>
   );

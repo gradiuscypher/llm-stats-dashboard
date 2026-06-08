@@ -7,17 +7,17 @@ LogEntryCreate schema so the dashboard read path works with zero changes.
 import json as _json
 import time
 import uuid as _uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
-from sqlmodel import Session, select
+from sqlmodel import Session
 
-from app.models.log_entry import LogEntry
 from app.schemas.log_entry import (
     CanonicalMessage,
     LogEntryCreate,
     RequestPayload,
     ResponsePayload,
+    ToolCall,
     UsagePayload,
 )
 
@@ -60,11 +60,11 @@ def _extract_message_from_choice(choice: dict) -> CanonicalMessage:
     return _to_canonical_message(msg, default_role="assistant")
 
 
-def _extract_tool_calls(choice: dict) -> list[dict]:
+def _extract_tool_calls(choice: dict) -> list[ToolCall]:
     """Extract tool calls from an OpenRouter choice's message."""
     msg = choice.get("message", {})
     tool_calls = msg.get("tool_calls", [])
-    result: list[dict] = []
+    result: list[ToolCall] = []
     for tc in tool_calls:
         func = tc.get("function", {})
         raw_args = func.get("arguments", {})
@@ -77,13 +77,14 @@ def _extract_tool_calls(choice: dict) -> list[dict]:
         else:
             args = raw_args if isinstance(raw_args, dict) else {}
         result.append(
-            {
-                "id": tc.get("id"),
-                "name": func.get("name", ""),
-                "arguments": args,
-            }
+            ToolCall(
+                id=tc.get("id"),
+                name=func.get("name", ""),
+                arguments=args,
+            )
         )
     return result
+
 
 
 def derive_conversation_id(
@@ -91,7 +92,7 @@ def derive_conversation_id(
     api_key_prefix: str,
     explicit: str | None = None,
     *,
-    message_ids: list[_uuid.UUID] | None = None,
+    message_ids: Any = None,  # noqa: ARG001 — kept for caller compatibility
     user_id: _uuid.UUID | None = None,
     db: Session | None = None,
 ) -> str:
@@ -100,33 +101,49 @@ def derive_conversation_id(
     Resolution order:
       1. Explicit X-Conversation-Id header (passed as explicit)
       2. OpenRouter user field / metadata
-      3. Prefix-ancestor inheritance (when DB is available):
-         find an existing entry whose message_ids is a proper prefix
-         of the new request's message_ids. This chains new turns to the
-         same conversation structurally, matching how stateless chat APIs
-         work (clients resend full history with each turn).
-      4. Mint a fresh UUID-based id — guarantees unrelated sessions with
-         coincidentally similar opening messages never merge.
+      3. Prefix-ancestor inheritance via indexed chain_key probes
+      4. Mint a fresh UUID-based id (fallback for brand-new threads)
 
-    Returns a stable string id.
+    Delegates to conversation_identity.infer_conversation_id.
     """
-    # 1. Explicit header
     if explicit:
         return explicit
 
-    # 2. OpenRouter user field
     user_field = request_body.get("user")
     if isinstance(user_field, str) and user_field.strip():
         return f"or-user-{user_field}"
 
-    # 3. Prefix-ancestor inheritance (requires DB + interned messages)
-    if message_ids and db is not None and user_id is not None:
-        parent_conv_id = _resolve_prefix_ancestor(message_ids, user_id, db)
-        if parent_conv_id is not None:
-            return parent_conv_id
+    if user_id is not None and db is not None:
+        raw_messages = request_body.get("messages", [])
+        if raw_messages:
+            from app.services.conversation_identity import infer_conversation_id
 
-    # 4. Mint fresh id — no structural link, so this is a new conversation
+            cid, _, _ = infer_conversation_id(
+                raw_messages, user_id, db,
+            )
+            return cid
+
     return f"or-{_uuid.uuid4().hex[:16]}"
+
+
+def candidate_conversation_id(
+    request_body: dict,
+    api_key_prefix: str,
+    explicit: str | None = None,
+    *,
+    user_id: _uuid.UUID | None = None,
+    db: Session | None = None,
+) -> str:
+    """Derive a candidate conversation_id before the call runs.
+
+    Thin wrapper around derive_conversation_id kept for call-site
+    compatibility.  Pre-call resolution in the proxy router now calls
+    infer_conversation_id directly.
+    """
+    return derive_conversation_id(
+        request_body, api_key_prefix, explicit,
+        user_id=user_id, db=db,
+    )
 
 
 def _resolve_prefix_ancestor(
@@ -134,36 +151,11 @@ def _resolve_prefix_ancestor(
     user_id: _uuid.UUID,
     db: Session,
 ) -> str | None:
-    """Find an existing entry whose message_ids is a proper prefix.
+    """Find an existing entry whose message_ids is a proper prefix (DEPRECATED).
 
-    Returns the entry's conversation_id if found, None otherwise.
-    Scans recent entries (same user) ordered by creation time descending
-    so the most-recent prefix-match wins when there are ties.
+    Replaced by indexed chain_key probes in conversation_identity.py.
+    Kept as a stub for backward compatibility; returns None.
     """
-    if len(message_ids) < 2:
-        return None
-
-    candidates = db.exec(
-        select(LogEntry)
-        .where(
-            LogEntry.user_id == user_id,
-            LogEntry.conversation_id.is_not(None),
-        )
-        .order_by(LogEntry.created_at.desc())
-    ).all()
-
-    # Sort by prefix length descending for greedy longest-match
-    candidates.sort(key=lambda e: len(e.message_ids), reverse=True)
-
-    for candidate in candidates:
-        prefix = candidate.message_ids
-        if not prefix:
-            continue
-        if len(prefix) >= len(message_ids):
-            continue  # must be a *proper* prefix
-        if message_ids[: len(prefix)] == prefix:
-            return candidate.conversation_id
-
     return None
 
 
@@ -173,15 +165,22 @@ def map_to_log_entry(
     conversation_id_header: str | None = None,
 ) -> LogEntryCreate:
     """Map an OpenRouter request + response to the canonical LogEntryCreate."""
+    # Use the request body for params and conversation derivation.
+    # For canonical message interning, use the ORIGINAL (pre-interceptor)
+    # messages so conversation identity is stable across plugin toggles.
     request_body = ctx.request_body
     model = ctx.model
 
     # ---- Request ----
-    messages = [_to_canonical_message(m) for m in request_body.get("messages", [])]
+    original_messages = ctx.original_request_messages
+    if not original_messages:
+        original_messages = request_body.get("messages", [])
+    messages = [_to_canonical_message(m) for m in original_messages]
     params = {k: v for k, v in request_body.items() if k not in ("messages", "model")}
     request = RequestPayload(messages=messages, params=params)
 
     # ---- Response ----
+    # Response is verbatim — no snapshotting needed.
     choices = upstream_response.get("choices", [])
     if choices:
         response_message = _extract_message_from_choice(choices[0])
@@ -251,10 +250,15 @@ def map_error_to_log_entry(
     conversation_id_header: str | None = None,
 ) -> LogEntryCreate:
     """Map a failed request to a LogEntryCreate with status='error'."""
+    # Use the request body for params and conversation derivation.
+    # For canonical message interning, use the ORIGINAL (pre-interceptor) messages.
     request_body = ctx.request_body
     model = ctx.model
 
-    messages = [_to_canonical_message(m) for m in request_body.get("messages", [])]
+    original_messages = ctx.original_request_messages
+    if not original_messages:
+        original_messages = request_body.get("messages", [])
+    messages = [_to_canonical_message(m) for m in original_messages]
     params = {k: v for k, v in request_body.items() if k not in ("messages", "model")}
     request = RequestPayload(messages=messages, params=params)
 

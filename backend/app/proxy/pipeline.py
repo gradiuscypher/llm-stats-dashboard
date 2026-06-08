@@ -59,6 +59,19 @@ class PluginPipeline:
     # on_response
     # ------------------------------------------------------------------
 
+    async def on_response_sync(self, ctx: ProxyContext) -> None:
+        """Run on_response_sync hooks in order (inline, before returning to client).
+
+        Mutator plugins implement this to touch the client-visible body.
+        Errors are caught & logged per-plugin (fail-open) so a buggy
+        plugin never breaks the client response.
+        """
+        for plugin in self._plugins:
+            try:
+                await plugin.on_response_sync(ctx)
+            except Exception:
+                logger.exception("Plugin %r on_response_sync failed", plugin.name)
+
     async def on_response(self, ctx: ProxyContext) -> None:
         """Run on_response hooks in order. Side-effect oriented (logging).
 

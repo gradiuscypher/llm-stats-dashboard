@@ -5,6 +5,7 @@ import { logsApi } from "@/lib/api";
 import { Layout } from "@/components/Layout";
 import { PageHeader } from "@/components/PageHeader";
 import { StatusBadge } from "@/components/StatusBadge";
+import { ModificationBadge } from "@/components/ModificationBadge";
 import { Field } from "@/components/Field";
 import { Button } from "@/components/Button";
 
@@ -100,6 +101,7 @@ export function LogsPage() {
                   <th>Model</th>
                   <th>Conversation</th>
                   <th>API Key</th>
+                  <th>Mod</th>
                   <th>Tokens</th>
                   <th>Cost</th>
                   <th>Latency</th>
@@ -140,6 +142,13 @@ export function LogsPage() {
                     <td>
                       <span className="text-xs">{log.api_key_name ?? "Legacy"}</span>
                     </td>
+                    <td>
+                      {(log.modification_count ?? 0) > 0 ? (
+                        <ModificationBadge count={log.modification_count ?? 0} size="sm" />
+                      ) : (log.diff_count ?? 0) > 0 ? (
+                        <ModificationBadge count={log.diff_count ?? 0} size="sm" />
+                      ) : null}
+                    </td>
                     <td className="tabular-nums">{log.total_tokens.toLocaleString()}</td>
                     <td className="tabular-nums">{fmtCost(log.cost_total)}</td>
                     <td className="tabular-nums">
@@ -152,7 +161,7 @@ export function LogsPage() {
                 ))}
                 {logs.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="text-center text-[var(--color-text-faint)] py-6">
+                    <td colSpan={9} className="text-center text-[var(--color-text-faint)] py-6">
                       No logs found.
                     </td>
                   </tr>

@@ -131,6 +131,38 @@ class LogEntryPublic(BaseModel):
     status: str
     client_timestamp: datetime | None
     created_at: datetime
+    modification_count: int = 0
+    diff_count: int = 0
+
+    model_config = {"from_attributes": True}
+
+
+class ModificationPublic(BaseModel):
+    """DEPRECATED — kept for schema compatibility. Use MessageDiffPublic instead."""
+
+    id: uuid.UUID
+    plugin_name: str
+    target: str  # "request" | "response"
+    message_index: int | None = None
+    message_role: str | None = None
+    summary: str
+    detail: dict[str, Any]
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class MessageDiffPublic(BaseModel):
+    """An original→final content diff for a single request message."""
+
+    id: uuid.UUID
+    message_index: int
+    role: str | None = None
+    change_kind: str  # "modified" | "added" | "removed"
+    original_content: Any
+    final_content: Any
+    modified_by: list[str]
+    created_at: datetime
 
     model_config = {"from_attributes": True}
 
@@ -143,6 +175,8 @@ class LogEntryDetail(LogEntryPublic):
     tool_calls: list[Any]
     error: str | None
     metadata_extra: dict[str, Any]
+    modifications: list[ModificationPublic] = []
+    request_diffs: list[MessageDiffPublic] = []
 
 
 class ConversationResponse(BaseModel):
@@ -184,13 +218,21 @@ class TranscriptMessage(BaseModel):
 
     message_id: uuid.UUID
     role: str
-    content: Any  # str | list[MessagePart] | dict
+    content: Any  # str | list[MessagePart] | dict — canonical (original) content
     reasoning: str | None = None
     reasoning_details: list[Any] | None = None
     # Which call introduced this message (None for messages shared with parent)
     introduced_by_entry_id: uuid.UUID | None = None
     # 1-based index of the call that introduced this message
     introduced_by_call_index: int | None = None
+    # Plugin names that modified this message
+    modified_by: list[str] = []
+    # Original content (before transforms) — populated only when modified.
+    # UI diff toggle uses this to render original→final visual diff.
+    original_content: Any | None = None
+    # Final content (what was sent upstream after transforms) — populated only
+    # when modified.  The UI renders this as the "sent to model" side of the diff.
+    modified_content: Any | None = None
 
 
 class CallDivider(BaseModel):
@@ -208,6 +250,10 @@ class CallDivider(BaseModel):
     latency_ms: int | None
     status: str
     created_at: datetime
+    modification_count: int = 0
+    modifications: list[ModificationPublic] = []
+    diff_count: int = 0
+    diffs: list[MessageDiffPublic] = []
 
 
 class TranscriptBranch(BaseModel):

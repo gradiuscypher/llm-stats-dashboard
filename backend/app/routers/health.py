@@ -17,5 +17,5 @@ def healthz() -> dict:
 @router.get("/readyz")
 def readyz(db: Session = Depends(get_session)) -> dict:
     """Readiness probe — checks DB connectivity."""
-    db.exec(text("SELECT 1"))
+    db.exec(text("SELECT 1"))# ty:ignore[no-matching-overload]
     return {"status": "ok", "db": "connected"}

@@ -11,6 +11,8 @@ from sqlmodel import Session, select
 from app.db import get_session
 from app.models.api_key import ApiKey
 from app.models.log_entry import LogEntry
+from app.models.message_diff import MessageDiff
+from app.models.message_modification import MessageModification
 from app.models.user import User
 from app.schemas.log_entry import (
     CallDivider,
@@ -20,6 +22,8 @@ from app.schemas.log_entry import (
     LogEntryCreate,
     LogEntryDetail,
     LogEntryPublic,
+    MessageDiffPublic,
+    ModificationPublic,
     StatsResponse,
     TranscriptBranch,
     TranscriptMessage,
@@ -46,14 +50,13 @@ def _synthetic_trailing_reply(
 ) -> TranscriptMessage | None:
     """Build a synthetic TranscriptMessage from *entry.response* for the final turn.
 
-    LogEntry.message_ids stores request messages only. The model's response lives in
-    entry.response and is not interned. When this entry is the last call in its
-    branch (or the trunk), no later turn feeds its reply back as request history,
-    so the transcript would otherwise end on the user's last prompt.
+    When the assistant response has already been interned as part of
+    LogEntry.message_ids (the post-fix behavior), the response is present in the
+    trunk and no synthetic message is needed.  This helper is only needed for
+    entries created before the response-interning fix, where message_ids stored
+    request messages only.
 
-    This helper extracts entry.response.message and returns a TranscriptMessage
-    with a deterministic synthetic message_id. Returns None when the response is
-    empty or the entry errored out (nothing meaningful to render).
+    Returns None when the response is empty or the entry errored out.
 
     A turn with reasoning but empty final content is still emitted (reasoning-only
     / thinking-only turns from reasoning models).
@@ -86,7 +89,33 @@ def _synthetic_trailing_reply(
     )
 
 
-def _to_detail(e: LogEntry, messages: list[dict] | None = None) -> LogEntryDetail:
+def _is_empty_response(content: dict) -> bool:
+    """Return True if *content* represents a response with no displayable content.
+
+    Mirrors the logic in _synthetic_trailing_reply so that interned empty
+    assistant replies (error entries, tool-only turns without reasoning) are
+    filtered from the transcript trunk just like the synthetic version.
+    """
+    c = content.get("content")
+    reasoning = content.get("reasoning")
+    reasoning_details = content.get("reasoning_details")
+
+    has_content = c is not None
+    if isinstance(c, str) and c.strip() == "":
+        has_content = False
+    has_reasoning = bool(reasoning) or bool(reasoning_details)
+
+    return not has_content and not has_reasoning
+
+
+def _to_detail(
+    e: LogEntry,
+    messages: list[dict] | None = None,
+    modifications: list[MessageModification] | None = None,
+    modification_count: int = 0,
+    request_diffs: list[MessageDiff] | None = None,
+    diff_count: int = 0,
+) -> LogEntryDetail:
     """Serialize a LogEntry to LogEntryDetail, rehydrating messages if provided.
 
     Pass pre-fetched *messages* (already in order) to avoid per-entry DB queries.
@@ -96,6 +125,8 @@ def _to_detail(e: LogEntry, messages: list[dict] | None = None) -> LogEntryDetai
     request = dict(e.request)  # shallow copy of params blob
     if messages is not None:
         request["messages"] = messages
+    mods_pub = [ModificationPublic.model_validate(m) for m in (modifications or [])]
+    diffs_pub = [MessageDiffPublic.model_validate(d) for d in (request_diffs or [])]
     return LogEntryDetail(
         id=e.id,
         user_id=e.user_id,
@@ -118,13 +149,34 @@ def _to_detail(e: LogEntry, messages: list[dict] | None = None) -> LogEntryDetai
         tool_calls=e.tool_calls,
         error=e.error,
         metadata_extra=e.metadata_extra,
+        modification_count=modification_count,
+        modifications=mods_pub,
+        diff_count=diff_count,
+        request_diffs=diffs_pub,
     )
 
 
 def _to_detail_with_db(e: LogEntry, db: Session) -> LogEntryDetail:
-    """Single-entry detail fetch — rehydrates messages in one query."""
+    """Single-entry detail fetch — rehydrates messages, modifications, and diffs."""
     messages = rehydrate_messages(e.message_ids, db)
-    return _to_detail(e, messages)
+    mods = list(
+        db.exec(
+            select(MessageModification).where(MessageModification.log_entry_id == e.id)
+        ).all()
+    )
+    diffs = list(
+        db.exec(
+            select(MessageDiff).where(MessageDiff.log_entry_id == e.id)
+        ).all()
+    )
+    return _to_detail(
+        e,
+        messages,
+        modifications=mods,
+        modification_count=len(mods),
+        request_diffs=diffs,
+        diff_count=len(diffs),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -217,21 +269,53 @@ async def list_logs(
     if until:
         query = query.where(LogEntry.created_at <= until)
 
-    query = query.order_by(LogEntry.created_at.desc()).offset(offset).limit(limit)  # type: ignore[arg-type]
+    query = query.order_by(LogEntry.created_at.desc()).offset(offset).limit(limit)# ty:ignore[unresolved-attribute]
     entries = db.exec(query).all()
 
     # Batch-resolve api_key names to avoid N+1
     key_ids = {e.api_key_id for e in entries if e.api_key_id is not None}
     key_name_map: dict[uuid.UUID, str] = {}
     if key_ids:
-        keys = db.exec(select(ApiKey).where(ApiKey.id.in_(list(key_ids)))).all()  # type: ignore[arg-type]
+        keys = db.exec(select(ApiKey).where(ApiKey.id.in_(list(key_ids)))).all()# ty:ignore[unresolved-attribute]
         key_name_map = {k.id: k.name for k in keys}
+
+    # Batch-resolve modification counts (backward compat)
+    # and diff counts (new)
+    entry_ids = [e.id for e in entries]
+    mod_counts: dict[uuid.UUID, int] = {}
+    diff_counts: dict[uuid.UUID, int] = {}
+    if entry_ids:
+        from sqlalchemy import func as sa_func
+
+        # Modification counts (legacy table)
+        count_rows = db.exec(
+            select(
+                MessageModification.log_entry_id,
+                sa_func.count(MessageModification.id).label("cnt"),  # ty:ignore[invalid-argument-type]
+            )
+            .where(MessageModification.log_entry_id.in_(entry_ids))# ty:ignore[unresolved-attribute]
+            .group_by(MessageModification.log_entry_id)# ty:ignore[invalid-argument-type]
+        ).all()
+        mod_counts = {row.log_entry_id: row.cnt for row in count_rows}# ty:ignore[unresolved-attribute]
+
+        # Diff counts (new table)
+        diff_rows = db.exec(
+            select(
+                MessageDiff.log_entry_id,
+                sa_func.count(MessageDiff.id).label("cnt"),  # ty:ignore[invalid-argument-type]
+            )
+            .where(MessageDiff.log_entry_id.in_(entry_ids))# ty:ignore[unresolved-attribute]
+            .group_by(MessageDiff.log_entry_id)# ty:ignore[invalid-argument-type]
+        ).all()
+        diff_counts = {row.log_entry_id: row.cnt for row in diff_rows}# ty:ignore[unresolved-attribute]
 
     result: list[LogEntryPublic] = []
     for e in entries:
         p = LogEntryPublic.model_validate(e)
         if e.api_key_id and e.api_key_id in key_name_map:
             p.api_key_name = key_name_map[e.api_key_id]
+        p.modification_count = mod_counts.get(e.id, 0)
+        p.diff_count = diff_counts.get(e.id, 0)
         result.append(p)
     return result
 
@@ -279,33 +363,33 @@ async def list_conversations(
     # Base WHERE conditions shared by the aggregate query and count subquery.
     conditions: list = [
         LogEntry.user_id == user.id,
-        LogEntry.conversation_id.is_not(None),
+        LogEntry.conversation_id.is_not(None),# ty:ignore[unresolved-attribute]
     ]
     if since:
         conditions.append(LogEntry.created_at >= since)
     if until:
         conditions.append(LogEntry.created_at <= until)
     if conversation_id:
-        conditions.append(LogEntry.conversation_id.ilike(f"%{conversation_id}%"))
+        conditions.append(LogEntry.conversation_id.ilike(f"%{conversation_id}%"))# ty:ignore[unresolved-attribute]
 
     # model / provider: "any call in the conversation" semantics.
     # First find matching conversation_ids, then include ALL calls in those conversations.
     if model or provider:
         sub = select(LogEntry.conversation_id).where(
             LogEntry.user_id == user.id,
-            LogEntry.conversation_id.is_not(None),
+            LogEntry.conversation_id.is_not(None),# ty:ignore[unresolved-attribute]
         )
         if model:
             sub = sub.where(LogEntry.model == model)
         if provider:
             sub = sub.where(LogEntry.provider == provider)
         matching_ids_subq = sub.distinct().subquery()
-        conditions.append(LogEntry.conversation_id.in_(select(matching_ids_subq.c.conversation_id)))
+        conditions.append(LogEntry.conversation_id.in_(select(matching_ids_subq.c.conversation_id)))# ty:ignore[unresolved-attribute]
 
     # Aggregate query
     agg = (
         select(
-            LogEntry.conversation_id.label("conversation_id"),
+            LogEntry.conversation_id.label("conversation_id"),# ty:ignore[unresolved-attribute]
             func.count().label("call_count"),
             func.coalesce(func.sum(LogEntry.total_tokens), 0).label("total_tokens"),
             func.sum(LogEntry.cost_total).label("total_cost"),
@@ -314,14 +398,14 @@ async def list_conversations(
             func.bool_or(LogEntry.status == "error").label("has_error"),
             func.array_agg(func.distinct(LogEntry.model)).label("models"),
             func.array_agg(func.distinct(LogEntry.provider)).label("providers"),
-        )
+        )  # ty:ignore[no-matching-overload]
         .where(*conditions)
         .group_by(LogEntry.conversation_id)
     )
 
     # Count total groups (before pagination)
     count_subq = agg.subquery()
-    total = db.execute(select(func.count()).select_from(count_subq)).scalar_one()
+    total = db.execute(select(func.count()).select_from(count_subq)).scalar_one()# ty:ignore[deprecated]
 
     # Sort mapping
     sort_map = {
@@ -335,7 +419,7 @@ async def list_conversations(
     sort_attr = sort_attr.asc() if order_dir == "asc" else sort_attr.desc()
 
     paginated = select(count_subq).order_by(sort_attr).offset(offset).limit(limit)
-    rows = db.execute(paginated).all()
+    rows = db.execute(paginated).all()  # ty:ignore[deprecated]
 
     # Build response
     convos: list[ConversationSummary] = []
@@ -371,7 +455,7 @@ async def get_conversation(
     entries = db.exec(
         select(LogEntry)
         .where(LogEntry.user_id == user.id, LogEntry.conversation_id == conversation_id)
-        .order_by(LogEntry.created_at)  # type: ignore[arg-type]
+        .order_by(LogEntry.created_at)# ty:ignore[invalid-argument-type]
     ).all()
 
     if not entries:
@@ -383,8 +467,19 @@ async def get_conversation(
 
     # Batch-fetch all messages needed across all entries in one query.
     id_to_content = batch_rehydrate_messages([e.message_ids for e in entries], db)
+
+    # Batch-fetch diffs for all entries.
+    from app.services.diffs import batch_fetch_diffs
+    entry_ids = [e.id for e in entries]
+    diffs_by_entry = batch_fetch_diffs(entry_ids, db) if entry_ids else {}
+
     rehydrated_entries = [
-        _to_detail(e, [id_to_content[mid] for mid in e.message_ids if mid in id_to_content])
+        _to_detail(
+            e,
+            [id_to_content[mid] for mid in e.message_ids if mid in id_to_content],
+            request_diffs=diffs_by_entry.get(e.id, []),
+            diff_count=len(diffs_by_entry.get(e.id, [])),
+        )
         for e in entries
     ]
 
@@ -423,7 +518,7 @@ async def get_transcript(
     entries = db.exec(
         select(LogEntry)
         .where(LogEntry.user_id == user.id, LogEntry.conversation_id == conversation_id)
-        .order_by(LogEntry.created_at)  # type: ignore[arg-type]
+        .order_by(LogEntry.created_at)# ty:ignore[invalid-argument-type]
     ).all()
 
     if not entries:
@@ -432,24 +527,87 @@ async def get_transcript(
     # Batch-fetch all messages.
     id_to_content = batch_rehydrate_messages([e.message_ids for e in entries], db)
 
-    # Build call dividers (1-indexed, chronological across entire conversation).
-    all_dividers: list[CallDivider] = [
-        CallDivider(
-            entry_id=e.id,
-            call_index=idx + 1,
-            model=e.model,
-            provider=e.provider,
-            prompt_tokens=e.prompt_tokens,
-            completion_tokens=e.completion_tokens,
-            total_tokens=e.total_tokens,
-            reasoning_tokens=e.reasoning_tokens,
-            cost_total=e.cost_total,
-            latency_ms=e.latency_ms,
-            status=e.status,
-            created_at=e.created_at,
+    # Batch-fetch modifications for all entries in this conversation (legacy).
+    # Batch-fetch message_diffs for all entries (new).
+    entry_ids = [e.id for e in entries]
+    all_mods: list[MessageModification] = []
+    all_diffs: list[MessageDiff] = []
+    if entry_ids:
+        all_mods = list(
+            db.exec(
+                select(MessageModification).where(
+                    MessageModification.log_entry_id.in_(entry_ids)  # ty:ignore[unresolved-attribute]
+                )
+            ).all()
         )
-        for idx, e in enumerate(entries)
-    ]
+        all_diffs = list(
+            db.exec(
+                select(MessageDiff).where(
+                    MessageDiff.log_entry_id.in_(entry_ids)  # ty:ignore[unresolved-attribute]
+                )
+            ).all()
+        )
+    # Map entry_id → list of modifications
+    mods_by_entry: dict[uuid.UUID, list[MessageModification]] = {}
+    for mod in all_mods:
+        mods_by_entry.setdefault(mod.log_entry_id, []).append(mod)
+    # Map entry_id → list of diffs
+    diffs_by_entry: dict[uuid.UUID, list[MessageDiff]] = {}
+    for d in all_diffs:
+        diffs_by_entry.setdefault(d.log_entry_id, []).append(d)
+    # Map entry_id → set of (role, index) for transcript message modified_by
+    mod_targets_by_entry: dict[uuid.UUID, set[tuple[str, int]]] = {}
+    mod_plugins_by_entry: dict[uuid.UUID, set[str]] = {}
+    for mod in all_mods:
+        if mod.message_role and mod.message_index is not None:
+            mod_targets_by_entry.setdefault(mod.log_entry_id, set()).add(
+                (mod.message_role, mod.message_index)
+            )
+        mod_plugins_by_entry.setdefault(mod.log_entry_id, set()).add(mod.plugin_name)
+    # Build a message_id-keyed diff lookup.
+    # With A1 (canonical = original), entry.message_ids[diff.message_index] is the
+    # interned message id for the original content — message_index aligns with the
+    # position in the original message array so the lookup is stable across toggles.
+    entry_map: dict[uuid.UUID, LogEntry] = {e.id: e for e in entries}
+    diff_by_message_id: dict[uuid.UUID, MessageDiff] = {}
+    for d in all_diffs:
+        if d.change_kind != "modified":
+            continue
+        e = entry_map.get(d.log_entry_id)
+        if e is None:
+            continue
+        if d.message_index < len(e.message_ids):
+            mid = e.message_ids[d.message_index]
+            diff_by_message_id[mid] = d
+
+    # Build call dividers (1-indexed, chronological across entire conversation).
+    all_dividers: list[CallDivider] = []
+    for idx, e in enumerate(entries):
+        eid = e.id
+        entry_mods = mods_by_entry.get(eid, [])
+        mods_pub = [ModificationPublic.model_validate(m) for m in entry_mods]
+        entry_diffs = diffs_by_entry.get(eid, [])
+        diffs_pub = [MessageDiffPublic.model_validate(d) for d in entry_diffs]
+        all_dividers.append(
+            CallDivider(
+                entry_id=eid,
+                call_index=idx + 1,
+                model=e.model,
+                provider=e.provider,
+                prompt_tokens=e.prompt_tokens,
+                completion_tokens=e.completion_tokens,
+                total_tokens=e.total_tokens,
+                reasoning_tokens=e.reasoning_tokens,
+                cost_total=e.cost_total,
+                latency_ms=e.latency_ms,
+                status=e.status,
+                created_at=e.created_at,
+                modification_count=len(entry_mods),
+                modifications=mods_pub,
+                diff_count=len(entry_diffs),
+                diffs=diffs_pub,
+            )
+        )
     divider_map = {d.entry_id: d for d in all_dividers}
 
     # Detect branching: if any entry's parent_entry_id forms a non-linear tree,
@@ -487,30 +645,80 @@ async def get_transcript(
         new_ids = [mid for mid in entry.message_ids if mid not in seen_ids]
         if new_ids:
             trunk_dividers.append(divider_map[entry.id])
-        for mid in new_ids:
+        # Plugin names that modified messages in this entry
+        sorted(mod_plugins_by_entry.get(entry.id, set()))
+        for idx_in_entry, mid in enumerate(new_ids):
             seen_ids.add(mid)
             content = id_to_content.get(mid, {})
+            msg_role = content.get("role", "")
+
+            # Skip empty assistant responses (no content, no reasoning) —
+            # these are error entries / tool-only turns whose interned
+            # response adds nothing to the transcript.
+            if msg_role == "assistant" and _is_empty_response(content):
+                continue
+
+            # Check if this message (by role + position in entry) was modified
+            msg_modified_by: list[str] = []
+            targets = mod_targets_by_entry.get(entry.id, set())
+            if (msg_role, idx_in_entry) in targets:
+                entry_mods = mods_by_entry.get(entry.id, [])
+                msg_modified_by = sorted(
+                    set(
+                        m.plugin_name
+                        for m in entry_mods
+                        if m.message_role == msg_role and m.message_index == idx_in_entry
+                    )
+                )
+            # Look up diff by message_id (stable across toggles with A1).
+            diff = diff_by_message_id.get(mid)
+            if diff is not None and diff.modified_by and not msg_modified_by:
+                msg_modified_by = diff.modified_by
             trunk_messages.append(
                 TranscriptMessage(
                     message_id=mid,
-                    role=content.get("role", ""),
+                    role=msg_role,
                     content=content.get("content", ""),
                     reasoning=content.get("reasoning"),
                     reasoning_details=content.get("reasoning_details"),
                     introduced_by_entry_id=entry.id,
                     introduced_by_call_index=divider_map[entry.id].call_index,
+                    modified_by=msg_modified_by,
+                    original_content=(
+                        diff.original_content.get("content")
+                        if diff is not None and diff.original_content
+                        else None
+                    ),
+                    modified_content=(
+                        diff.final_content.get("content")
+                        if diff is not None and diff.final_content
+                        else None
+                    ),
                 )
             )
 
-    # Append the final assistant reply for the last trunk entry (if any).
+    # Append the final assistant reply for the last trunk entry (if any),
+    # but only when the response isn't already present in message_ids.
     if trunk_entries:
         tail_entry = trunk_entries[-1]
-        tail_reply = _synthetic_trailing_reply(
-            tail_entry,
-            call_index=divider_map[tail_entry.id].call_index,
-        )
-        if tail_reply is not None:
-            trunk_messages.append(tail_reply)
+        # Check whether the assistant response is already in the trunk —
+        # if the last trunk message was introduced by this entry and has
+        # role=assistant, the response was interned and already shown.
+        already_present = False
+        if trunk_messages:
+            last_msg = trunk_messages[-1]
+            if (
+                last_msg.role == "assistant"
+                and last_msg.introduced_by_entry_id == tail_entry.id
+            ):
+                already_present = True
+        if not already_present:
+            tail_reply = _synthetic_trailing_reply(
+                tail_entry,
+                call_index=divider_map[tail_entry.id].call_index,
+            )
+            if tail_reply is not None:
+                trunk_messages.append(tail_reply)
 
     # Build branches — entries not on the trunk.
     branch_entries = [e for e in entries if e.id not in trunk_entry_ids]
@@ -544,30 +752,72 @@ async def get_transcript(
             new_ids = [mid for mid in entry.message_ids if mid not in branch_seen]
             if new_ids:
                 branch_dividers.append(divider_map[entry.id])
-            for mid in new_ids:
+            for idx_in_entry, mid in enumerate(new_ids):
                 branch_seen.add(mid)
                 content = id_to_content.get(mid, {})
+                msg_role = content.get("role", "")
+
+                # Skip empty assistant responses.
+                if msg_role == "assistant" and _is_empty_response(content):
+                    continue
+
+                msg_modified_by: list[str] = []
+                targets = mod_targets_by_entry.get(entry.id, set())
+                if (msg_role, idx_in_entry) in targets:
+                    entry_mods = mods_by_entry.get(entry.id, [])
+                    msg_modified_by = sorted(
+                        set(
+                            m.plugin_name
+                            for m in entry_mods
+                            if m.message_role == msg_role and m.message_index == idx_in_entry
+                        )
+                    )
+                # Look up diff by message_id (stable across toggles with A1).
+                diff = diff_by_message_id.get(mid)
+                if diff is not None and diff.modified_by and not msg_modified_by:
+                    msg_modified_by = diff.modified_by
                 branch_messages.append(
                     TranscriptMessage(
                         message_id=mid,
-                        role=content.get("role", ""),
+                        role=msg_role,
                         content=content.get("content", ""),
                         reasoning=content.get("reasoning"),
                         reasoning_details=content.get("reasoning_details"),
                         introduced_by_entry_id=entry.id,
                         introduced_by_call_index=divider_map[entry.id].call_index,
+                        modified_by=msg_modified_by,
+                        original_content=(
+                            diff.original_content.get("content")
+                            if diff is not None and diff.original_content
+                            else None
+                        ),
+                        modified_content=(
+                            diff.final_content.get("content")
+                            if diff is not None and diff.final_content
+                            else None
+                        ),
                     )
                 )
 
-        # Append the final assistant reply for the last branch entry (if any).
+        # Append the final assistant reply for the last branch entry (if any),
+        # but only when the response isn't already in message_ids.
         if branch_chain:
             tail_entry = branch_chain[-1]
-            tail_reply = _synthetic_trailing_reply(
-                tail_entry,
-                call_index=divider_map[tail_entry.id].call_index,
-            )
-            if tail_reply is not None:
-                branch_messages.append(tail_reply)
+            already_present = False
+            if branch_messages:
+                last_msg = branch_messages[-1]
+                if (
+                    last_msg.role == "assistant"
+                    and last_msg.introduced_by_entry_id == tail_entry.id
+                ):
+                    already_present = True
+            if not already_present:
+                tail_reply = _synthetic_trailing_reply(
+                    tail_entry,
+                    call_index=divider_map[tail_entry.id].call_index,
+                )
+                if tail_reply is not None:
+                    branch_messages.append(tail_reply)
 
         built_branches.append(
             TranscriptBranch(

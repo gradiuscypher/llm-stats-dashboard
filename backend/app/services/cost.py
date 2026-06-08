@@ -22,7 +22,7 @@ def resolve_cost(entry: LogEntryCreate, db: Session) -> tuple[float | None, str,
     price = db.exec(
         select(ModelPrice)
         .where(ModelPrice.provider == entry.provider, ModelPrice.model == entry.model)
-        .order_by(ModelPrice.effective_at.desc())  # type: ignore[arg-type]
+        .order_by(ModelPrice.effective_at.desc())# ty:ignore[unresolved-attribute]
     ).first()
 
     if price is None:

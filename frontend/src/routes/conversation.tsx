@@ -1,11 +1,21 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { logsApi, TranscriptMessage, CallDivider, TranscriptBranch } from "@/lib/api";
+import {
+  logsApi,
+  pluginsApi,
+  TranscriptMessage,
+  CallDivider,
+  TranscriptBranch,
+  ConversationPluginState,
+} from "@/lib/api";
 import { selectReasoningRender } from "@/lib/reasoning";
 import { Layout } from "@/components/Layout";
 import { PageHeader } from "@/components/PageHeader";
 import { StatusBadge } from "@/components/StatusBadge";
+import { ModificationBadge, ModifiedByLabel } from "@/components/ModificationBadge";
+import { MessageDiff } from "@/components/MessageDiff";
+import { useShowDiff } from "@/lib/useShowDiff";
 
 interface ConversationPageProps {
   conversationId: string;
@@ -79,6 +89,11 @@ function DividerBar({ divider }: { divider: CallDivider }) {
             <span>${divider.cost_total.toFixed(6)}</span>
           </>
         )}
+        <ModificationBadge
+          count={divider.modification_count ?? 0}
+          pluginNames={divider.modifications?.map((m) => m.plugin_name)}
+          size="sm"
+        />
       </Link>
       <div className="flex-1 h-px bg-[var(--color-border)]" />
     </div>
@@ -146,22 +161,36 @@ function ReasoningBlock({
 
 // ─── Single Message Bubble ────────────────────────────────────────────────────
 
-function MessageBubble({ msg }: { msg: TranscriptMessage }) {
+function MessageBubble({ msg, showDiff }: { msg: TranscriptMessage; showDiff: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const text = contentText(msg.content);
+  const modText = msg.modified_content != null ? contentText(msg.modified_content) : null;
   const isLong = text.length > 600;
   const displayText = isLong && !expanded ? text.slice(0, 600) + "…" : text;
   const styleClass = ROLE_STYLE[msg.role] ?? ROLE_STYLE.user;
   const label = ROLE_LABEL[msg.role] ?? msg.role;
   const showReasoning = msg.role === "assistant";
+  const hasModifications = msg.modified_by && msg.modified_by.length > 0;
+  const hasDiff = showDiff && modText != null && modText !== text;
 
   return (
-    <div className={`px-4 py-3 border-b border-[var(--color-border)] ${styleClass}`}>
-      <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5 opacity-60">{label}</p>
+    <div
+      className={`px-4 py-3 border-b border-[var(--color-border)] ${styleClass} ${
+        hasModifications ? "border-l-2 border-l-[var(--color-accent)]/40" : ""
+      }`}
+    >
+      <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5 opacity-60">
+        {label}
+        {hasModifications && <ModifiedByLabel pluginNames={msg.modified_by} />}
+      </p>
       {showReasoning && (
         <ReasoningBlock reasoning={msg.reasoning} reasoning_details={msg.reasoning_details} />
       )}
-      <p className="text-sm whitespace-pre-wrap leading-relaxed break-words">{displayText}</p>
+      {hasDiff && modText ? (
+        <MessageDiff original={displayText} final={modText} modifiedBy={msg.modified_by} />
+      ) : (
+        <p className="text-sm whitespace-pre-wrap leading-relaxed break-words">{displayText}</p>
+      )}
       {isLong && (
         <button
           onClick={() => setExpanded((v) => !v)}
@@ -180,9 +209,11 @@ function MessageBubble({ msg }: { msg: TranscriptMessage }) {
 function MessageThread({
   messages,
   dividers,
+  showDiff,
 }: {
   messages: TranscriptMessage[];
   dividers: CallDivider[];
+  showDiff: boolean;
 }) {
   // Build a lookup of message_id → index of the divider that precedes it.
   // A divider fires before the first message introduced by that call.
@@ -200,7 +231,7 @@ function MessageThread({
           {dividerBeforeEntry.has(msg.message_id) && (
             <DividerBar divider={dividerBeforeEntry.get(msg.message_id)!} />
           )}
-          <MessageBubble msg={msg} />
+          <MessageBubble msg={msg} showDiff={showDiff} />
         </div>
       ))}
     </div>
@@ -212,9 +243,11 @@ function MessageThread({
 function BranchPanel({
   branches,
   dividerMap,
+  showDiff,
 }: {
   branches: TranscriptBranch[];
   dividerMap: Map<string, CallDivider>;
+  showDiff: boolean;
 }) {
   const [activeBranch, setActiveBranch] = useState(0);
   if (branches.length === 0) return null;
@@ -253,12 +286,89 @@ function BranchPanel({
         </p>
       )}
 
-      <MessageThread messages={branch.messages} dividers={branch.dividers} />
+      <MessageThread messages={branch.messages} dividers={branch.dividers} showDiff={showDiff} />
     </div>
   );
 }
 
 // ─── Main page ────────────────────────────────────────────────────────────────
+
+function PluginToggle({
+  plugin,
+  conversationId,
+}: {
+  plugin: ConversationPluginState;
+  conversationId: string;
+}) {
+  const queryClient = useQueryClient();
+  const toggleMutation = useMutation({
+    mutationFn: ({ enabled }: { enabled: boolean }) => {
+      if (enabled) {
+        return pluginsApi.setConversationOverride(
+          conversationId,
+          plugin.name,
+          true
+        ) as unknown as Promise<void>;
+      }
+      return pluginsApi.deleteConversationOverride(conversationId, plugin.name);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["conversationPlugins", conversationId] });
+    },
+  });
+
+  const isOverride = plugin.override_enabled !== null;
+  const isOn = plugin.effective;
+
+  return (
+    <div className="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-2 last:border-b-0">
+      <div className="flex-1">
+        <span className="text-xs font-bold uppercase tracking-wider text-[var(--color-text)]">
+          {plugin.name}
+        </span>
+        {plugin.locked && (
+          <span className="ml-1 text-[9px] text-[var(--color-accent)] border border-[var(--color-accent)] px-1">
+            LOCKED
+          </span>
+        )}
+        {isOverride && !plugin.locked && (
+          <span className="ml-1 text-[9px] text-[var(--color-text-faint)] border border-[var(--color-border)] px-1">
+            OVERRIDE
+          </span>
+        )}
+        <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{plugin.description}</p>
+      </div>
+      <label className="flex items-center gap-2 cursor-pointer ml-3">
+        {plugin.locked ? (
+          <span className="w-8 h-4 rounded-full bg-[var(--color-accent)] relative cursor-not-allowed">
+            <span className="absolute top-0.5 left-0.5 w-3.5 h-3.5 rounded-full bg-white block" />
+          </span>
+        ) : (
+          <>
+            <input
+              type="checkbox"
+              className="sr-only"
+              checked={isOn}
+              onChange={(e) => toggleMutation.mutate({ enabled: e.target.checked })}
+            />
+            <span
+              className={`w-8 h-4 rounded-full relative transition-colors ${
+                isOn ? "bg-[var(--color-accent)]" : "bg-[var(--color-border)]"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white transition-transform ${
+                  isOn ? "left-[calc(100%-0.875rem)]" : "left-0.5"
+                }`}
+              />
+            </span>
+          </>
+        )}
+        <span className="text-xs text-[var(--color-text-muted)]">{isOn ? "On" : "Off"}</span>
+      </label>
+    </div>
+  );
+}
 
 export function ConversationPage({ conversationId }: ConversationPageProps) {
   const { data, isLoading, isError } = useQuery({
@@ -266,9 +376,16 @@ export function ConversationPage({ conversationId }: ConversationPageProps) {
     queryFn: () => logsApi.transcript(conversationId),
   });
 
+  const [showDiff, setShowDiff] = useShowDiff();
+
   const dividerMap = new Map<string, CallDivider>(
     (data?.dividers ?? []).map((d) => [d.entry_id, d])
   );
+
+  const { data: convPlugins = [], isLoading: convPluginsLoading } = useQuery({
+    queryKey: ["conversationPlugins", conversationId],
+    queryFn: () => pluginsApi.listConversationPlugins(conversationId),
+  });
 
   return (
     <Layout>
@@ -281,7 +398,7 @@ export function ConversationPage({ conversationId }: ConversationPageProps) {
       ) : (
         <>
           {/* Summary bar */}
-          <div className="flex gap-4 mb-6 text-xs text-[var(--color-text-muted)]">
+          <div className="flex gap-4 mb-6 text-xs text-[var(--color-text-muted)] items-center">
             <span>{data?.dividers.length ?? 0} calls</span>
             <span>{(data?.total_tokens ?? 0).toLocaleString()} tokens</span>
             {data?.total_cost != null && <span>${data.total_cost.toFixed(6)}</span>}
@@ -290,11 +407,44 @@ export function ConversationPage({ conversationId }: ConversationPageProps) {
                 {data.branches.length} branch{data.branches.length !== 1 ? "es" : ""}
               </span>
             )}
+            {/* Diff toggle */}
+            <button
+              onClick={() => setShowDiff(!showDiff)}
+              className={`ml-auto px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider
+                border cursor-pointer transition-colors bg-transparent ${
+                  showDiff
+                    ? "border-[var(--color-accent)] text-[var(--color-accent)]"
+                    : "border-[var(--color-border)] text-[var(--color-text-faint)]"
+                }`}
+            >
+              {showDiff ? "Diffs ON" : "Diffs OFF"}
+            </button>
           </div>
+
+          {/* Per-conversation plugin overrides */}
+          {convPlugins.length > 0 && (
+            <div className="mb-4 border border-[var(--color-border)] bg-[var(--color-surface)]">
+              <div className="px-3 py-2 border-b border-[var(--color-border)]">
+                <span className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
+                  Plugin Overrides
+                </span>
+                <span className="ml-2 text-[10px] text-[var(--color-text-faint)]">
+                  Overrides apply to future calls in this conversation
+                </span>
+              </div>
+              {convPluginsLoading ? (
+                <p className="px-3 py-2 text-xs text-[var(--color-text-faint)]">Loading…</p>
+              ) : (
+                convPlugins.map((p) => (
+                  <PluginToggle key={p.name} plugin={p} conversationId={conversationId} />
+                ))
+              )}
+            </div>
+          )}
 
           {/* Main trunk thread */}
           {(data?.trunk ?? []).length > 0 ? (
-            <MessageThread messages={data!.trunk} dividers={data!.dividers} />
+            <MessageThread messages={data!.trunk} dividers={data!.dividers} showDiff={showDiff} />
           ) : (
             <p className="text-sm text-[var(--color-text-muted)]">
               No messages in this conversation.
@@ -302,7 +452,9 @@ export function ConversationPage({ conversationId }: ConversationPageProps) {
           )}
 
           {/* Branch panels (only shown when conversation has divergences) */}
-          {data?.is_branched && <BranchPanel branches={data.branches} dividerMap={dividerMap} />}
+          {data?.is_branched && (
+            <BranchPanel branches={data.branches} dividerMap={dividerMap} showDiff={showDiff} />
+          )}
         </>
       )}
     </Layout>
