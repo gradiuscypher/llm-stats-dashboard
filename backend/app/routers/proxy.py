@@ -29,7 +29,7 @@ from app.proxy.assembler import StreamAssembler
 from app.proxy.context import ProxyContext
 from app.proxy.interceptor import RequestInterceptor, TransformContext
 from app.proxy.logging_sink import persist_error_log, persist_log
-from app.proxy.registry import resolve_pipeline
+from app.proxy.registry import is_plugin_enabled, resolve_pipeline
 from app.proxy.upstream import (
     _build_upstream_headers,
     _strip_hop_by_hop,
@@ -215,6 +215,34 @@ def _run_interceptor(
 
 
 # ---------------------------------------------------------------------------
+# Session tracking — inject session_id into the request body
+# ---------------------------------------------------------------------------
+
+
+def _apply_session_tracking(ctx: ProxyContext, db: Session) -> None:
+    """Inject conversation_id as session_id into the request body when enabled.
+
+    This runs after conversation identity has been resolved but before the
+    request is forwarded upstream. The session_id tells OpenRouter to group
+    related calls into a session on their side for debugging/metrics.
+    """
+    if not ctx.state.get("identity"):
+        return
+    conv_id = ctx.state["identity"].get("conversation_id")
+    if not conv_id:
+        return
+
+    enabled = is_plugin_enabled(
+        "session_tracking", ctx.user.id, conv_id, db,
+    )
+    if enabled:
+        ctx.request_body["session_id"] = conv_id
+        logger.debug(
+            "Injected session_id=%s for conversation %s", conv_id, conv_id,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Non-stream handler
 # ---------------------------------------------------------------------------
 
@@ -366,6 +394,9 @@ async def proxy_chat_completions(
     # Build transforms (no logging "plugin" — that's the sink now).
     transforms = resolve_pipeline(user.id, candidate_conv, db)
 
+    # Inject session_id into the request body if session_tracking is enabled.
+    _apply_session_tracking(ctx, db)
+
     # Run interceptor (request-side transforms).
     _run_interceptor(ctx, transforms)
 
@@ -425,6 +456,9 @@ async def proxy_completions(
 
     transforms = resolve_pipeline(user.id, candidate_conv, db)
     _run_interceptor(ctx, transforms)
+
+    # Inject session_id into the request body if session_tracking is enabled.
+    _apply_session_tracking(ctx, db)
 
     if ctx.is_stream:
         return await _handle_stream(ctx, path="/completions")

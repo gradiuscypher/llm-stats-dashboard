@@ -23,6 +23,15 @@ PLUGIN_REGISTRY: dict[str, type] = {
     "word_count": WordCountPlugin,
 }
 
+# Registry of body-level plugin names (not message transforms).
+# These are resolved via is_plugin_enabled() and applied directly in the router.
+BODY_PLUGINS: set[str] = {"session_tracking"}
+
+# All known plugin names (transforms + body-level) — used by the UI for listing/toggling
+# and by the router for O(1) validation.
+_ALL_PLUGIN_NAMES: frozenset[str] = frozenset(set(PLUGIN_REGISTRY) | BODY_PLUGINS)
+
+
 # Plugins that cannot be disabled by users; logging is no longer a plugin.
 LOCKED_PLUGINS: set[str] = set()
 
@@ -30,6 +39,9 @@ LOCKED_PLUGINS: set[str] = set()
 _DEFAULT_ENABLED: set[str] = set(
     n.strip() for n in settings.proxy_plugins.split(",") if n.strip() and n.strip() != "logging"
 )
+# session_tracking is always default-enabled so clients automatically benefit
+# from OpenRouter session grouping unless they explicitly disable it.
+_DEFAULT_ENABLED.add("session_tracking")
 
 
 def resolve_pipeline(
@@ -111,6 +123,51 @@ def resolve_pipeline(
         [p.name for p in pipeline],
     )
     return pipeline
+
+
+def all_plugin_names() -> list[str]:
+    """Return sorted list of all known plugin names (transforms + body-level)."""
+    return sorted(_ALL_PLUGIN_NAMES)
+
+
+def is_plugin_enabled(
+    plugin_name: str,
+    user_id: uuid.UUID,
+    conversation_id: str | None,
+    db: Session,
+) -> bool:
+    """Resolve whether a named plugin is enabled for this user/conversation.
+
+    Precedence: per-conversation override → per-user global → default.
+    Works for both transform plugins (PLUGIN_REGISTRY) and body-level
+    plugins (BODY_PLUGINS) using the same PluginConfig/PluginConfigConversation
+    rows stored in the database.
+    """
+    if plugin_name in LOCKED_PLUGINS:
+        return True
+
+    # Batch-fetch per-user global config.
+    global_rows = db.exec(
+        select(PluginConfig).where(PluginConfig.user_id == user_id)
+    ).all()
+    global_map: dict[str, bool] = {r.plugin_name: r.enabled for r in global_rows}
+
+    # Batch-fetch per-conversation overrides (if a conversation id is known).
+    conv_map: dict[str, bool] = {}
+    if conversation_id:
+        conv_rows = db.exec(
+            select(PluginConfigConversation).where(
+                PluginConfigConversation.user_id == user_id,
+                PluginConfigConversation.conversation_id == conversation_id,
+            )
+        ).all()
+        conv_map = {r.plugin_name: r.enabled for r in conv_rows}
+
+    if plugin_name in conv_map:
+        return conv_map[plugin_name]
+    if plugin_name in global_map:
+        return global_map[plugin_name]
+    return plugin_name in _DEFAULT_ENABLED
 
 
 # ---------------------------------------------------------------------------

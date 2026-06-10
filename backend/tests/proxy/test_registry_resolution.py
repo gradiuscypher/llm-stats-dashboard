@@ -41,8 +41,11 @@ def uid_fixture(session):
 
 @pytest.fixture(autouse=True)
 def _env_default_compression_only(monkeypatch):
-    """Default deployment: PROXY_PLUGINS = 'compression' (logging is a sink)."""
-    monkeypatch.setattr(registry, "_DEFAULT_ENABLED", {"compression"})
+    """Default deployment: PROXY_PLUGINS = 'compression' (logging is a sink).
+
+    session_tracking is always default-enabled regardless of PROXY_PLUGINS.
+    """
+    monkeypatch.setattr(registry, "_DEFAULT_ENABLED", {"compression", "session_tracking"})
     from app.config import settings
 
     monkeypatch.setattr(settings, "proxy_plugins", "compression")
@@ -124,6 +127,54 @@ def test_conversation_override_isolated_to_its_conversation(session, uid):
 
     assert "word_count" in _names(resolve_pipeline(uid, "conv-A", session))
     assert "word_count" not in _names(resolve_pipeline(uid, "conv-B", session))
+
+
+def test_is_plugin_enabled_default_true(session, uid):
+    """session_tracking is default-enabled when no rows exist."""
+    assert registry.is_plugin_enabled("session_tracking", uid, "any-conv", session) is True
+
+
+def test_is_plugin_enabled_global_off(session, uid):
+    """A global PluginConfig row with enabled=False overrides default."""
+    session.add(PluginConfig(user_id=uid, plugin_name="session_tracking", enabled=False))
+    session.commit()
+    assert registry.is_plugin_enabled("session_tracking", uid, "any-conv", session) is False
+
+
+def test_is_plugin_enabled_conv_override_beats_global(session, uid):
+    """Per-conversation override beats both global and default."""
+    conv = "conv-override-beats"
+    session.add(PluginConfig(user_id=uid, plugin_name="session_tracking", enabled=False))
+    session.add(
+        PluginConfigConversation(
+            user_id=uid, conversation_id=conv,
+            plugin_name="session_tracking", enabled=True,
+        )
+    )
+    session.commit()
+    assert registry.is_plugin_enabled("session_tracking", uid, conv, session) is True
+
+
+def test_is_plugin_enabled_conv_off_beats_global_on(session, uid):
+    """Per-conversation DISABLE beats global enable."""
+    conv = "conv-disable-override"
+    session.add(PluginConfig(user_id=uid, plugin_name="session_tracking", enabled=True))
+    session.add(
+        PluginConfigConversation(
+            user_id=uid, conversation_id=conv,
+            plugin_name="session_tracking", enabled=False,
+        )
+    )
+    session.commit()
+    assert registry.is_plugin_enabled("session_tracking", uid, conv, session) is False
+
+
+def test_all_plugin_names_includes_session_tracking(session, uid):
+    """all_plugin_names() returns both transforms and body-level plugins."""
+    names = registry.all_plugin_names()
+    assert "session_tracking" in names
+    assert "compression" in names
+    assert "word_count" in names
 
 
 def test_locked_plugins_still_can_be_disabled(session, uid):

@@ -222,6 +222,7 @@ in the dashboard.
 | `logging` | **active (locked)** | Maps OpenRouter → canonical schema, persists to DB. Always on, cannot be disabled. |
 | `compression` | **active** | Compresses messages via Headroom to save tokens before forwarding. Four compressors: JSON SmartCrusher, code AST, ONNX text Kompress, CacheAligner. CPU-only. On by default. |
 | `word_count` | **sample** | Appends a `[word_count: N]` marker to the last user message and the assistant response. Demonstrates the full modification-logging + toggle machinery. |
+| `session_tracking` | **active** | Forwards the conversation ID to OpenRouter as `session_id` so related calls are grouped into sessions on OpenRouter's dashboard for debugging and metrics comparison. On by default, no client changes required. |
 
 ### Plugin toggles
 
@@ -237,6 +238,7 @@ Toggle behavior:
 - `logging` is locked enabled — it cannot be turned off.
 - A per-conversation override wins over the user-global setting, which wins
   over the default (plugins in `PROXY_PLUGINS` are on by default; others off).
+- `session_tracking` is always default-enabled regardless of `PROXY_PLUGINS`.
 - An *enable* at either the user-global or per-conversation level brings a
   plugin into the pipeline even when it is **not** listed in `PROXY_PLUGINS`
   (such plugins run after the env-ordered ones). In particular, a
@@ -283,9 +285,10 @@ OPENROUTER_API_KEY=sk-or-...           # server-held upstream key (required)
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 OPENROUTER_REFERER=                    # optional HTTP-Referer header
 OPENROUTER_APP_TITLE=LLM Stats Dashboard
-# Available plugins: logging, compression, word_count
-# logging is always-on and cannot be disabled
-# Default: compression,logging (compression enabled by default)
+# Available plugins: logging, compression, word_count, session_tracking
+# - logging is always-on and cannot be disabled
+# - session_tracking is default-enabled regardless of PROXY_PLUGINS
+# Default: compression,logging (compression + session_tracking enabled by default)
 PROXY_PLUGINS=compression,logging                  # comma-separated plugin names
 PROXY_UPSTREAM_TIMEOUT_S=120
 PROXY_STREAM_IDLE_TIMEOUT_S=120

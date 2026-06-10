@@ -11,7 +11,7 @@ from sqlmodel import Session, select
 
 from app.db import get_session
 from app.models.plugin_config import PluginConfig, PluginConfigConversation
-from app.proxy.registry import _DEFAULT_ENABLED, LOCKED_PLUGINS, PLUGIN_REGISTRY
+from app.proxy.registry import _DEFAULT_ENABLED, LOCKED_PLUGINS, all_plugin_names
 from app.schemas.plugin import (
     ConversationPluginState,
     PluginInfo,
@@ -30,8 +30,9 @@ router = APIRouter(tags=["plugins"])
 
 PLUGIN_META: dict[str, str] = {
     "logging": "Automatically logs every proxied LLM call to the dashboard.",
-    "compression": "Stub — placeholder for future message compression / history trimming.",
+    "compression": "Reduces tokens via Headroom: SmartCrusher, CacheAligner, CCR, ONNX Kompress.",
     "word_count": "Appends a word-count marker to messages sent to and received from the provider.",
+    "session_tracking": "Passes conversation ID as session_id to OpenRouter for group debugging.",
 }
 
 
@@ -83,7 +84,7 @@ async def list_plugins(
     global_state = _resolve_global_state(user.id, db)
 
     result: list[PluginInfo] = []
-    for name, _cls in sorted(PLUGIN_REGISTRY.items()):
+    for name in all_plugin_names():
         desc = PLUGIN_META.get(name, "")
         locked = name in LOCKED_PLUGINS
         user_enabled = global_state.get(name)
@@ -117,7 +118,7 @@ async def set_plugin_global(
     """
     user = get_current_user(request, db)
 
-    if plugin_name not in PLUGIN_REGISTRY:
+    if plugin_name not in all_plugin_names():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unknown plugin: {plugin_name}",
@@ -191,7 +192,7 @@ async def list_conversation_plugins(
     conv_state = _resolve_conversation_state(user.id, conversation_id, db)
 
     result: list[ConversationPluginState] = []
-    for name in sorted(PLUGIN_REGISTRY.keys()):
+    for name in all_plugin_names():
         desc = PLUGIN_META.get(name, "")
         locked = name in LOCKED_PLUGINS
         global_enabled = global_state.get(name)
@@ -236,7 +237,7 @@ async def set_conversation_plugin_override(
     """
     user = get_current_user(request, db)
 
-    if plugin_name not in PLUGIN_REGISTRY:
+    if plugin_name not in all_plugin_names():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unknown plugin: {plugin_name}",

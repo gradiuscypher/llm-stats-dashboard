@@ -1174,3 +1174,119 @@ class TestDisableStopsNewModsHistoryPersists:
             f"Second user msg should NOT be modified, got {second_user['modified_by']}"
         )
         assert second_user["modified_content"] is None
+
+
+# ---------------------------------------------------------------------------
+# Session tracking — session_id injection
+# ---------------------------------------------------------------------------
+
+
+class TestSessionTracking:
+    """session_tracking plugin injects the conversation_id as session_id into
+    the request body sent upstream (OpenRouter) for session grouping."""
+
+    @respx.mock
+    def test_session_id_injected_by_default(self, auth_client, monkeypatch):
+        """Default (session_tracking enabled) → forwarded body has session_id."""
+        _enable_proxy_config(monkeypatch)
+        raw_key = _create_api_key(auth_client, ["proxy:use"])
+
+        conv_id = "or-session-default"
+        captured_upstream: list[dict] = []
+
+        def _capture(request):
+            import contextlib
+            import json as _json
+            with contextlib.suppress(Exception):
+                captured_upstream.append(_json.loads(request.content))
+            return httpx.Response(200, json={
+                "id": "chatcmpl-sess1",
+                "object": "chat.completion",
+                "model": "gpt-4o",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "Hello!"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7},
+            })
+
+        respx.post("https://openrouter.ai/api/v1/chat/completions").mock(
+            side_effect=_capture
+        )
+
+        resp = auth_client.post(
+            "/api/v1/chat/completions",
+            json={
+                "model": "gpt-4o",
+                "messages": [{"role": "user", "content": "Hello"}],
+            },
+            headers={**_bearer_headers(raw_key), "x-conversation-id": conv_id},
+        )
+        assert resp.status_code == 200
+        assert len(captured_upstream) == 1
+        forwarded = captured_upstream[0]
+        assert "session_id" in forwarded, (
+            "Forwarded body must include session_id when session_tracking is enabled"
+        )
+        assert forwarded["session_id"] == conv_id, (
+            f"session_id mismatch: expected {conv_id}, got {forwarded['session_id']}"
+        )
+
+    @respx.mock
+    def test_session_id_absent_when_disabled(self, auth_client, monkeypatch):
+        """Disabling session_tracking globally → no session_id in forwarded body."""
+        _enable_proxy_config(monkeypatch)
+        raw_key = _create_api_key(auth_client, ["proxy:use"])
+        csrf = auth_client.get("/api/v1/auth/csrf").json()["csrf_token"]
+
+        # Disable session_tracking globally.
+        resp_toggle = auth_client.put(
+            "/api/v1/plugins/session_tracking",
+            json={"enabled": False},
+            headers={"x-csrf-token": csrf},
+        )
+        assert resp_toggle.status_code == 200
+
+        conv_id = "or-session-disabled"
+        captured_upstream: list[dict] = []
+
+        def _capture(request):
+            import contextlib
+            import json as _json
+            with contextlib.suppress(Exception):
+                captured_upstream.append(_json.loads(request.content))
+            return httpx.Response(200, json={
+                "id": "chatcmpl-sess2",
+                "object": "chat.completion",
+                "model": "gpt-4o",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "Nope"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3},
+            })
+
+        respx.post("https://openrouter.ai/api/v1/chat/completions").mock(
+            side_effect=_capture
+        )
+
+        resp = auth_client.post(
+            "/api/v1/chat/completions",
+            json={
+                "model": "gpt-4o",
+                "messages": [{"role": "user", "content": "Hi"}],
+            },
+            headers={**_bearer_headers(raw_key), "x-conversation-id": conv_id},
+        )
+        assert resp.status_code == 200
+        assert len(captured_upstream) == 1
+        forwarded = captured_upstream[0]
+        assert "session_id" not in forwarded, (
+            "Forwarded body must NOT include session_id when session_tracking is disabled"
+        )
