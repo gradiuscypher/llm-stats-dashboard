@@ -25,6 +25,9 @@ if TYPE_CHECKING:
     from app.proxy.context import ProxyContext
 
 
+from app.services.messages import _strip_ephemeral_fields
+
+
 def _to_canonical_message(msg: dict, default_role: str = "user") -> CanonicalMessage:
     """Construct a CanonicalMessage from a raw message dict.
 
@@ -32,7 +35,12 @@ def _to_canonical_message(msg: dict, default_role: str = "user") -> CanonicalMes
     If the message cannot be validated (e.g. an unrecognized content shape),
     the entire dict is serialized to a plaintext JSON string so that we
     never lose logging data.
+
+    Ephemeral provider metadata (e.g. ``cache_control``) is stripped so
+    the identical message from different round-trips produces the same
+    ``content_hash`` / intern id.
     """
+    msg = _strip_ephemeral_fields(msg)
     role = msg.get("role", default_role)
     content = msg.get("content", "")
     if content is None:

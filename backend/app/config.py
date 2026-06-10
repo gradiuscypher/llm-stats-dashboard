@@ -35,15 +35,29 @@ class Settings(BaseSettings):
     proxy_upstream_timeout_s: int = 120
     proxy_stream_idle_timeout_s: int = 120
 
-    # Compression (Headroom)
-    compression_target_ratio: float | None = None
+    # Compression (Headroom) — Tier 1: CompressConfig knobs
+    compression_protect_analysis_context: bool = True
     compression_protect_recent: int = 4
     compression_compress_user_messages: bool = False
     compression_compress_system_messages: bool = True
+    compression_target_ratio: float | None = None
     compression_min_tokens: int = 250
     compression_kompress_model: str = (
         ""  # "" -> Headroom default ONNX model; "disabled" -> ML text off
     )
+    compression_optimize: bool = True  # A/B kill-switch: False = passthrough
+    compression_model_limit: int = 200000  # context window override for token pressure
+
+    # Compression (Headroom) — Tier 2: per-transform pipeline config
+    compression_cache_aligner_enabled: bool = False
+    compression_intercept_tools: bool = False
+    compression_ccr_enabled: bool = True
+    compression_ccr_inject_marker: bool = True
+    compression_smartcrusher_max_items: int = 15
+    compression_smartcrusher_min_tokens: int = 200
+    compression_smartcrusher_profile: str = "moderate"  # "conservative"|"moderate"|"aggressive"
+    compression_read_compress_superseded: bool = False
+
     headroom_telemetry: bool = False  # if False, set HEADROOM_TELEMETRY=off at startup
 
     @property

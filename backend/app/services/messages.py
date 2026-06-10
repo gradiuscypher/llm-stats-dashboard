@@ -24,6 +24,29 @@ from app.models.message import Message
 # ---------------------------------------------------------------------------
 
 
+def _strip_ephemeral_fields(msg: dict) -> dict:
+    """Return a shallow copy of *msg* with ephemeral metadata stripped.
+
+    Strips provider-specific fields that don't affect message identity:
+    - ``cache_control`` from top-level and from each content part
+
+    This ensures the same semantic message always produces the same
+    ``content_hash``, regardless of whether cache hints were attached.
+    """
+    cleaned = {k: v for k, v in msg.items() if k != "cache_control"}
+
+    # Also strip cache_control from each content part.
+    content = cleaned.get("content")
+    if isinstance(content, list):
+        cleaned["content"] = [
+            {k: v for k, v in (p if isinstance(p, dict) else {}).items() if k != "cache_control"}
+            if isinstance(p, dict)
+            else p
+            for p in content
+        ]
+    return cleaned
+
+
 def _canonical_json(obj: dict) -> str:
     """Deterministic JSON for a message dict — used as the hash input."""
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
@@ -59,7 +82,10 @@ def intern_messages(
     if not messages:
         return []
 
-    hashes = [content_hash(m) for m in messages]
+    # Strip ephemeral fields (cache_control etc.) so identical messages
+    # from different round-trips produce the same content_hash → same id.
+    cleaned = [_strip_ephemeral_fields(m) for m in messages]
+    hashes = [content_hash(m) for m in cleaned]
 
     # Flush any pending ORM state first so the connection is clean.
     db.flush()
@@ -79,8 +105,8 @@ def intern_messages(
                     str(uuid.uuid4()),
                     str(user_id),
                     h,
-                    messages[i].get("role", ""),
-                    _canonical_json(messages[i]),
+                    cleaned[i].get("role", ""),
+                    _canonical_json(cleaned[i]),
                 ),
             )
 

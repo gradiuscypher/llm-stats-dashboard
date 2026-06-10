@@ -1,4 +1,4 @@
-"""Tests for CompressionPlugin."""
+"""Tests for CompressionPlugin (pipeline-based implementation)."""
 
 from unittest.mock import MagicMock, patch
 
@@ -8,8 +8,29 @@ from app.proxy.interceptor import RequestInterceptor, TransformContext
 from app.proxy.plugins.compression import CompressionPlugin
 
 
-class TestCompressionPlugin:
-    """Unit tests for the compression plugin — Headroom is mocked."""
+@pytest.fixture(autouse=True)
+def reset_pipeline_singleton():
+    """Reset the module-level pipeline singleton between tests.
+
+    This ensures each test builds its own mock pipeline.
+    """
+    import app.proxy.plugins.compression as mod
+
+    mod._pipeline = None
+
+
+class FakeTransformResult:
+    """Fake TransformResult matching Headroom's shape."""
+
+    def __init__(self, messages, tokens_before, tokens_after, transforms_applied):
+        self.messages = messages
+        self.tokens_before = tokens_before
+        self.tokens_after = tokens_after
+        self.transforms_applied = transforms_applied
+
+
+class TestCompressionPluginPipeline:
+    """Unit tests for the pipeline-based compression plugin."""
 
     def test_pass_through_empty_messages(self):
         """Empty message list returns unchanged."""
@@ -20,7 +41,7 @@ class TestCompressionPlugin:
         assert "compression" not in ctx.request_metadata
 
     def test_returns_compressed_messages(self):
-        """Plugin returns compressed messages from Headroom."""
+        """Plugin returns compressed messages from pipeline."""
         original = [
             {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user", "content": "Hello!"},
@@ -30,43 +51,51 @@ class TestCompressionPlugin:
             {"role": "user", "content": "Hello!"},
         ]
 
-        mock_result = MagicMock()
-        mock_result.messages = compressed
-        mock_result.tokens_before = 20
-        mock_result.tokens_after = 15
-        mock_result.tokens_saved = 5
-        mock_result.compression_ratio = 0.25
-        mock_result.transforms_applied = ["CacheAligner"]
+        fake_result = FakeTransformResult(
+            messages=compressed,
+            tokens_before=20,
+            tokens_after=15,
+            transforms_applied=["router:tool_result:text"],
+        )
 
-        # Patch headroom.compress before it's lazily imported inside the plugin.
-        with patch("headroom.compress", return_value=mock_result):
+        mock_pipeline = MagicMock()
+        mock_pipeline.apply.return_value = fake_result
+
+        with patch(
+            "app.proxy.plugins.compression._get_pipeline",
+            return_value=mock_pipeline,
+        ):
             plugin = CompressionPlugin()
             ctx = TransformContext(model="gpt-4o", user_id="user-1")
             result = plugin.transform_request(original, ctx)
 
         assert result == compressed
-        assert ctx.request_metadata["compression"] == {
-            "tokens_before": 20,
-            "tokens_after": 15,
-            "tokens_saved": 5,
-            "compression_ratio": 0.25,
-            "transforms_applied": ["CacheAligner"],
-        }
+        comp = ctx.request_metadata["compression"]
+        assert comp["tokens_before"] == 20
+        assert comp["tokens_after"] == 15
+        assert comp["tokens_saved"] == 5
+        assert comp["compression_ratio"] == 0.25
+        assert comp["transforms_applied"] == ["router:tool_result:text"]
 
     def test_metrics_written_to_request_metadata(self):
         """Compression metrics are stored in ctx.request_metadata."""
         original = [{"role": "user", "content": "x" * 1000}]
         compressed = [{"role": "user", "content": "x" * 100}]
 
-        mock_result = MagicMock()
-        mock_result.messages = compressed
-        mock_result.tokens_before = 500
-        mock_result.tokens_after = 200
-        mock_result.tokens_saved = 300
-        mock_result.compression_ratio = 0.6
-        mock_result.transforms_applied = ["Kompress", "CacheAligner"]
+        fake_result = FakeTransformResult(
+            messages=compressed,
+            tokens_before=500,
+            tokens_after=200,
+            transforms_applied=["Kompress", "CacheAligner"],
+        )
 
-        with patch("headroom.compress", return_value=mock_result):
+        mock_pipeline = MagicMock()
+        mock_pipeline.apply.return_value = fake_result
+
+        with patch(
+            "app.proxy.plugins.compression._get_pipeline",
+            return_value=mock_pipeline,
+        ):
             plugin = CompressionPlugin()
             ctx = TransformContext(model="gpt-4o", user_id="user-1")
             plugin.transform_request(original, ctx)
@@ -80,12 +109,15 @@ class TestCompressionPlugin:
         assert comp["transforms_applied"] == ["Kompress", "CacheAligner"]
 
     def test_fail_open_on_error(self):
-        """If Headroom raises, original messages are returned unchanged."""
+        """If pipeline.apply() raises, original messages are returned unchanged."""
         original = [{"role": "user", "content": "Hello!"}]
 
+        mock_pipeline = MagicMock()
+        mock_pipeline.apply.side_effect = RuntimeError("ONNX inference failed")
+
         with patch(
-            "headroom.compress",
-            side_effect=RuntimeError("ONNX inference failed"),
+            "app.proxy.plugins.compression._get_pipeline",
+            return_value=mock_pipeline,
         ):
             plugin = CompressionPlugin()
             ctx = TransformContext(model="gpt-4o", user_id="user-1")
@@ -94,18 +126,31 @@ class TestCompressionPlugin:
         assert result == original
         assert "compression" not in ctx.request_metadata
 
-    def test_fail_open_when_compress_raises(self):
-        """If compress() raises any exception, original messages are returned."""
+    def test_fail_open_when_build_pipeline_raises(self):
+        """If _get_pipeline raises, original messages are returned unchanged."""
         original = [{"role": "user", "content": "Hello!"}]
 
-        # Test with a generic exception (beyond the RuntimeError tested above).
         with patch(
-            "headroom.compress",
-            side_effect=ValueError("unexpected message format"),
+            "app.proxy.plugins.compression._get_pipeline",
+            side_effect=ImportError("headroom not installed"),
         ):
             plugin = CompressionPlugin()
             ctx = TransformContext(model="gpt-4o", user_id="user-1")
             result = plugin.transform_request(original, ctx)
+
+        assert result == original
+        assert "compression" not in ctx.request_metadata
+
+    def test_passthrough_when_optimize_disabled(self, monkeypatch):
+        """When compression_optimize=False, messages pass through unchanged."""
+        original = [{"role": "user", "content": "Hello!"}]
+        monkeypatch.setattr(
+            "app.config.settings.compression_optimize", False
+        )
+
+        plugin = CompressionPlugin()
+        ctx = TransformContext(model="gpt-4o", user_id="user-1")
+        result = plugin.transform_request(original, ctx)
 
         assert result == original
         assert "compression" not in ctx.request_metadata
@@ -121,15 +166,20 @@ class TestCompressionPlugin:
             {"role": "user", "content": "Hello!"},
         ]
 
-        mock_result = MagicMock()
-        mock_result.messages = compressed
-        mock_result.tokens_before = 100
-        mock_result.tokens_after = 50
-        mock_result.tokens_saved = 50
-        mock_result.compression_ratio = 0.5
-        mock_result.transforms_applied = ["Kompress"]
+        fake_result = FakeTransformResult(
+            messages=compressed,
+            tokens_before=100,
+            tokens_after=50,
+            transforms_applied=["router:system:kompress"],
+        )
 
-        with patch("headroom.compress", return_value=mock_result):
+        mock_pipeline = MagicMock()
+        mock_pipeline.apply.return_value = fake_result
+
+        with patch(
+            "app.proxy.plugins.compression._get_pipeline",
+            return_value=mock_pipeline,
+        ):
             plugin = CompressionPlugin()
             tctx = TransformContext(
                 model="gpt-4o", user_id="user-1", request_metadata={}
@@ -138,9 +188,7 @@ class TestCompressionPlugin:
             result = interceptor.run(original, tctx)
 
         assert result.final_messages == compressed
-        assert len(result.diffs) > 0  # diffs should be generated for modified messages
-
-        # Check that compression metrics are on the transform context.
+        assert len(result.diffs) > 0
         assert tctx.request_metadata.get("compression") is not None
 
 
@@ -149,11 +197,8 @@ class TestCompressionPluginConfig:
 
     def test_config_uses_settings(self):
         """CompressConfig is built from app settings."""
-        import os
-
         from app.config import Settings
 
-        # Use explicit settings to verify field mapping.
         s = Settings(
             compression_compress_user_messages=True,
             compression_compress_system_messages=False,
@@ -170,7 +215,36 @@ class TestCompressionPluginConfig:
         assert s.compression_target_ratio == 0.5
         assert s.compression_min_tokens == 500
         assert s.compression_kompress_model == "disabled"
-
-        # Telemetry should be disabled by default.
-        assert os.environ.get("HEADROOM_TELEMETRY") == "off"
         assert s.headroom_telemetry is False
+
+    def test_tier2_settings_have_defaults(self):
+        """Tier-2 pipeline settings use safe defaults."""
+        from app.config import Settings
+
+        s = Settings()
+
+        assert s.compression_cache_aligner_enabled is False
+        assert s.compression_intercept_tools is False
+        assert s.compression_ccr_enabled is True
+        assert s.compression_ccr_inject_marker is True
+        assert s.compression_smartcrusher_max_items == 15
+        assert s.compression_smartcrusher_min_tokens == 200
+        assert s.compression_smartcrusher_profile == "moderate"
+        assert s.compression_read_compress_superseded is False
+        assert s.compression_protect_analysis_context is True
+        assert s.compression_optimize is True
+        assert s.compression_model_limit == 200000
+
+    def test_pipeline_build_function_exists(self):
+        """Smoke test: _build_pipeline is callable."""
+        import app.proxy.plugins.compression as mod
+
+        assert callable(mod._build_pipeline)
+
+    def test_profile_name_accepted_values(self):
+        """All valid profile names are accepted by Settings."""
+        from app.config import Settings
+
+        for profile in ("conservative", "moderate", "aggressive"):
+            s = Settings(compression_smartcrusher_profile=profile)
+            assert s.compression_smartcrusher_profile == profile

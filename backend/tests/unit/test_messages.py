@@ -107,6 +107,97 @@ def test_hash_differs_when_reasoning_details_differs():
     assert content_hash(msg1) != content_hash(msg2)
 
 
+def test_strip_ephemeral_removes_top_level_cache_control():
+    """cache_control at top level is stripped."""
+    from app.services.messages import _strip_ephemeral_fields
+
+    msg = {"role": "user", "content": "hello", "cache_control": {"type": "ephemeral"}}
+    cleaned = _strip_ephemeral_fields(msg)
+    assert "cache_control" not in cleaned
+    assert cleaned["role"] == "user"
+    assert cleaned["content"] == "hello"
+
+
+def test_strip_ephemeral_removes_content_part_cache_control():
+    """cache_control inside content parts is stripped."""
+    from app.services.messages import _strip_ephemeral_fields
+
+    msg = {
+        "role": "user",
+        "content": [
+            {"text": "hello", "type": "text", "cache_control": {"type": "ephemeral"}}
+        ],
+    }
+    cleaned = _strip_ephemeral_fields(msg)
+    part = cleaned["content"][0]
+    assert "cache_control" not in part
+    assert part["text"] == "hello"
+    assert part["type"] == "text"
+
+
+def test_strip_ephemeral_handles_string_content():
+    """content as a plain string is not affected."""
+    from app.services.messages import _strip_ephemeral_fields
+
+    msg = {"role": "assistant", "content": "response text"}
+    cleaned = _strip_ephemeral_fields(msg)
+    assert cleaned == {"role": "assistant", "content": "response text"}
+
+
+def test_strip_ephemeral_handles_missing_content():
+    """Messages without content (e.g. tool results) are handled gracefully."""
+    from app.services.messages import _strip_ephemeral_fields
+
+    msg = {"role": "tool", "name": "read_file", "tool_call_id": "abc"}
+    cleaned = _strip_ephemeral_fields(msg)
+    assert cleaned == msg
+
+
+def test_hash_same_with_and_without_cache_control():
+    """Same semantic message with/without cache_control produces the same hash."""
+    msg_with = {
+        "role": "user",
+        "content": [
+            {"text": "hello", "type": "text", "cache_control": {"type": "ephemeral"}}
+        ],
+    }
+    msg_without = {
+        "role": "user",
+        "content": [{"text": "hello", "type": "text"}],
+    }
+    # Raw hashes should differ (cache_control changes the JSON).
+    assert content_hash(msg_with) != content_hash(msg_without)
+
+    # After stripping, they should match (this is what intern_messages does now).
+    from app.services.messages import _strip_ephemeral_fields
+
+    cleaned_with = _strip_ephemeral_fields(msg_with)
+    cleaned_without = _strip_ephemeral_fields(msg_without)
+    h_with = content_hash(cleaned_with)
+    h_without = content_hash(cleaned_without)
+    assert h_with == h_without, f"{h_with} != {h_without}"
+
+
+def test_intern_same_message_different_cache_control(db, db_user_id):
+    """Intern returns the same id for a message sent with/without cache_control."""
+    msg_with_cache = {
+        "role": "user",
+        "content": [
+            {"text": "Planning a feature", "type": "text", "cache_control": {"type": "ephemeral"}}
+        ],
+    }
+    msg_without_cache = {
+        "role": "user",
+        "content": [{"text": "Planning a feature", "type": "text"}],
+    }
+
+    ids1 = intern_messages([msg_with_cache], db_user_id, db)
+    ids2 = intern_messages([msg_without_cache], db_user_id, db)
+
+    assert ids1 == ids2, f"{ids1} != {ids2}"
+    assert ids1[0] == ids2[0]
+
+
 # ---------------------------------------------------------------------------
 # intern_messages — deduplication
 # ---------------------------------------------------------------------------
