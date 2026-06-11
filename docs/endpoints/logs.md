@@ -155,22 +155,51 @@ aggregate token and cost totals. Useful for reconstructing a full LLM session.
 
 | Param | Default | Description |
 |-------|---------|-------------|
-| `days` | 30 | Lookback window (1–365) |
+| `since` | none | Lower bound (ISO-8601). Omit for "all time". |
+| `until` | now | Upper bound (ISO-8601). |
+| `interval` | `1d` | Bucket granularity: `5m`, `1h`, `1d`, `1w`, or `1mo`. |
+| `days` | — | Legacy shorthand: sets `since` to N days ago with `interval=1d`. Ignored when `since` is provided. |
 
 **Response** `200 OK`
 ```json
 {
   "total_calls": 142,
   "total_tokens": 88320,
+  "total_prompt_tokens": 60000,
+  "total_reasoning_tokens": 1200,
+  "total_cache_read_tokens": 5000,
+  "total_cache_write_tokens": 1000,
+  "total_tokens_saved": 3000,
   "total_cost": 1.2045,
+  "interval": "1d",
+  "since": "2026-05-11T00:00:00Z",
+  "until": "2026-06-10T16:00:00Z",
   "by_day": [
-    { "date": "2025-06-01", "calls": 12, "total_tokens": 7200, "cost": 0.09 }
+    {
+      "date": "2026-06-01", "calls": 12, "total_tokens": 7200,
+      "reasoning_tokens": 100, "cache_read_tokens": 500,
+      "cache_write_tokens": 0, "tokens_saved": 0, "cost": 0.09
+    }
   ],
   "by_model": [
-    { "model": "gpt-4o", "calls": 98, "total_tokens": 60000, "cost": 0.85 }
+    {
+      "model": "gpt-4o", "calls": 98, "total_tokens": 60000,
+      "reasoning_tokens": 0, "cache_read_tokens": 4500,
+      "cache_write_tokens": 0, "tokens_saved": 2000, "cost": 0.85
+    }
   ]
 }
 ```
+
+- `interval` echoes the bucket granularity applied. The `date` field in each
+  bucket row is an ISO label appropriate to the interval (e.g. `HH:MM` for
+  `5m`/`1h`, `YYYY-MM-DD` for `1d`/`1w`, `YYYY-MM` for `1mo`).
+- `total_prompt_tokens` is the sum of `prompt_tokens` across all calls.
+- `total_cache_read_tokens` / `total_cache_write_tokens` aggregate upstream
+  KV-cache metrics reported by the provider (proxy-populated).
+- `total_tokens_saved` aggregates token savings from the compression plugin.
+  Per-row `tokens_saved` and `cache_*` fields are also available in
+  `by_day` and `by_model`.
 
 ---
 
@@ -188,6 +217,9 @@ Returned by list and ingest endpoints (no request/response bodies).
   "prompt_tokens": 22,
   "completion_tokens": 3,
   "total_tokens": 25,
+  "reasoning_tokens": 0,
+  "cache_read_tokens": 0,
+  "cache_write_tokens": 0,
   "cost_total": 0.000185,
   "cost_currency": "USD",
   "cost_source": "computed",

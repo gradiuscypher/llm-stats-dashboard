@@ -1,7 +1,7 @@
 """Log ingestion and retrieval endpoints."""
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -38,6 +38,7 @@ from app.security.sessions import get_current_user
 from app.services.ingest import ingest_log_entry
 from app.services.messages import batch_rehydrate_messages, rehydrate_messages
 from app.services.stats import get_stats
+from app.utils.time import utcnow
 
 router = APIRouter(tags=["logs"])
 
@@ -609,6 +610,8 @@ async def get_transcript(
                 completion_tokens=e.completion_tokens,
                 total_tokens=e.total_tokens,
                 reasoning_tokens=e.reasoning_tokens,
+                cache_read_tokens=e.cache_read_tokens,
+                cache_write_tokens=e.cache_write_tokens,
                 cost_total=e.cost_total,
                 latency_ms=e.latency_ms,
                 status=e.status,
@@ -883,11 +886,27 @@ async def get_transcript(
 async def stats_summary(
     request: Request,
     db: Session = Depends(get_session),
-    days: Annotated[int, Query(ge=1, le=365)] = 30,
+    since: datetime | None = Query(default=None),
+    until: datetime | None = Query(default=None),
+    interval: str = Query(default="1d", pattern=r"^(5m|1h|1d|1w|1mo)$"),
+    days: Annotated[int, Query(ge=1, le=365)] | None = None,
 ) -> StatsResponse:
     """
-    Aggregated stats for the current user: total tokens, cost, calls per day,
-    breakdown by model. Default window is the last 30 days.
+    Aggregated stats for the current user with flexible time range and bucket
+    granularity.
+
+    - **since**/**until**: explicit time bounds (ISO 8601).  Omit ``since`` for "all time".
+    - **interval**: bucket granularity — ``5m``, ``1h``, ``1d``, ``1w``, or ``1mo``.
+    - **days**: legacy shorthand; sets ``since`` to N days ago with ``interval="1d"``.
+      Ignored when ``since`` is provided.
     """
     user = await _resolve_user(request, db)
-    return get_stats(user.id, db, days=days)
+
+    # Legacy back-compat: if only `days` is supplied, translate to since/interval.
+    if since is None and days is not None:
+        since = utcnow() - timedelta(days=days)
+        interval = "1d"
+
+    return get_stats(
+        user.id, db, since=since, until=until, interval=interval,
+    )

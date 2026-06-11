@@ -92,7 +92,7 @@ backend/
 | `User` | `users` | Account (username, email, password hash) |
 | `UserSession` | `user_sessions` | Server-side session records (cookie-backed) |
 | `ApiKey` | `api_keys` | Scoped API keys (`prefix`, argon2 `key_hash`, `scopes`, revocation) |
-| `LogEntry` | `log_entries` | One LLM call. Stores provider/model, usage, cost, status, `conversation_id`, `message_ids` (ARRAY), `parent_entry_id` (conversation tree) |
+| `LogEntry` | `log_entries` | One LLM call. Stores provider/model, usage (incl. cache tokens), cost, status, `conversation_id`, `message_ids` (ARRAY), `parent_entry_id` (conversation tree) |
 | `Message` | `messages` | Deduplicated/interned messages (content-hashed), referenced by `LogEntry.message_ids` |
 | `ModelPrice` | `model_prices` | Per-model pricing for cost computation |
 | `PluginConfig` | `plugin_config` | Per-user global plugin enable/disable state |
@@ -131,7 +131,7 @@ OpenAPI: `/api/openapi.json`; Swagger `/api/docs`; ReDoc `/api/redoc`.
 | `ingest.py` | `ingest_log_entry()` — validate, intern messages, resolve cost + parent, persist a `LogEntry` |
 | `messages.py` | Message interning/dedup: `content_hash`, `intern_messages`, `rehydrate_messages`, `batch_rehydrate_messages`, `resolve_parent_entry_id`. Canonical history stores **original** (pre-transform) messages; diffs are an overlay. |
 | `cost.py` | `resolve_cost()` — use client-supplied cost or compute from `model_prices` |
-| `stats.py` | `get_stats()` — aggregates for the dashboard (totals, by-day, by-model) |
+| `stats.py` | `get_stats()` — aggregates for the dashboard (totals, by-day, by-model) with flexible time ranges (intervals: 5m/1h/1d/1w/1mo), cache metrics, and compression savings |
 | `openrouter_map.py` | Maps OpenRouter responses → canonical `LogEntryCreate`; `derive_conversation_id`, `candidate_conversation_id` (pre-call, no-DB), `map_to_log_entry`, `map_error_to_log_entry` |
 | `modifications.py` | `persist_modifications` — (Legacy) writes `RecordedModification` entries to the `message_modifications` table |
 | `diffs.py` | `persist_diffs`, `batch_fetch_diffs` — persists `MessageDiff` rows from the interceptor to the `message_diffs` table |

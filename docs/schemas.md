@@ -120,17 +120,21 @@ this schema.
   "prompt_tokens": 22,
   "completion_tokens": 3,
   "total_tokens": 25,
-  "reasoning_tokens": 8
+  "reasoning_tokens": 8,
+  "cache_read_tokens": 10,
+  "cache_write_tokens": 5
 }
 ```
 
-All fields default to `0` if omitted. `reasoning_tokens` captures
-`completion_tokens_details.reasoning_tokens` from providers that report it.
+All fields default to `0` if omitted.
 
-All fields default to `0` if omitted. `total_tokens` is used for cost
-computation if individual counts aren't available. `reasoning_tokens`
-is reported by reasoning/thinking-capable models (e.g. reasoning models
-on OpenRouter).
+- `reasoning_tokens` captures `completion_tokens_details.reasoning_tokens` from
+  providers that report it (reasoning/thinking-capable models).
+- `cache_read_tokens` captures `prompt_tokens_details.cached_tokens` — the number
+  of prompt tokens served from a KV-cache hit (proxy-populated).
+- `cache_write_tokens` captures `cache_creation_input_tokens` — the number of
+  tokens written to cache for future reads (proxy-populated; only populated when
+  reported by the upstream provider).
 
 ---
 

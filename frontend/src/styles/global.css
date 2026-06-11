@@ -18,6 +18,8 @@
   --color-text-faint: #a0a09a;
   --color-accent: #1a6b3a; /* utilitarian green */
   --color-accent-hover: #155530;
+  --color-success: #d97706; /* amber — warm, distinct from blue/green */
+  --color-info: #3b82f6; /* blue — for cache reads */
   --color-danger: #b91c1c;
   --color-warning: #92400e;
   --color-code-bg: #e8e7e2;
@@ -56,6 +58,8 @@
     --color-text-faint: #555550;
     --color-accent: #3dba6e; /* brighter green — readable on dark */
     --color-accent-hover: #52d483;
+    --color-success: #f59e0b; /* amber — bright on dark */
+    --color-info: #60a5fa; /* blue — brighter for dark bg */
     --color-danger: #f87171;
     --color-warning: #fbbf24;
     --color-code-bg: #141412;
@@ -73,6 +77,8 @@
   --color-text-faint: #555550;
   --color-accent: #3dba6e;
   --color-accent-hover: #52d483;
+  --color-success: #f59e0b;
+  --color-info: #60a5fa;
   --color-danger: #f87171;
   --color-warning: #fbbf24;
   --color-code-bg: #141412;

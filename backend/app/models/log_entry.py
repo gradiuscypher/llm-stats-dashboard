@@ -18,6 +18,18 @@ class LogEntry(SQLModel, table=True):
         Index("ix_log_entries_user_created", "user_id", "created_at"),
         Index("ix_log_entries_user_conversation", "user_id", "conversation_id"),
         Index("ix_log_entries_user_model", "user_id", "model"),
+        Index(
+            "ix_log_entries_user_chain_key",
+            "user_id",
+            "chain_key",
+            postgresql_where="(chain_key IS NOT NULL)",
+        ),
+        Index(
+            "ix_log_entries_user_chain_prefix",
+            "user_id",
+            "chain_prefix_key",
+            postgresql_where="(chain_prefix_key IS NOT NULL)",
+        ),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -67,6 +79,11 @@ class LogEntry(SQLModel, table=True):
     completion_tokens: int = Field(default=0)
     total_tokens: int = Field(default=0)
     reasoning_tokens: int = Field(default=0)
+    # Cache tokens — captured from provider usage details (proxy-populated).
+    # cache_read_tokens: prompt tokens served from KV-cache (e.g. PMT).
+    # cache_write_tokens: tokens written to cache for future reads.
+    cache_read_tokens: int = Field(default=0)
+    cache_write_tokens: int = Field(default=0)
 
     # Cost
     cost_total: float | None = Field(default=None)

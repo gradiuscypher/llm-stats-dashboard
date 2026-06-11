@@ -55,6 +55,8 @@ class UsagePayload(BaseModel):
     completion_tokens: int = 0
     total_tokens: int = 0
     reasoning_tokens: int = 0
+    cache_read_tokens: int = 0  # proxy-populated: cached prompt tokens (KV-cache hits)
+    cache_write_tokens: int = 0  # proxy-populated: tokens written to cache
 
 
 class CostPayload(BaseModel):
@@ -124,6 +126,8 @@ class LogEntryPublic(BaseModel):
     completion_tokens: int
     total_tokens: int
     reasoning_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
     cost_total: float | None
     cost_currency: str
     cost_source: str
@@ -249,6 +253,8 @@ class CallDivider(BaseModel):
     completion_tokens: int
     total_tokens: int
     reasoning_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
     cost_total: float | None
     latency_ms: int | None
     status: str
@@ -297,10 +303,13 @@ class TranscriptResponse(BaseModel):
 
 
 class DailyStats(BaseModel):
-    date: str
+    date: str  # ISO bucket label — granularity varies by request interval
     calls: int
     total_tokens: int
     reasoning_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    tokens_saved: int = 0  # compression savings from metadata_extra
     cost: float | None
 
 
@@ -309,13 +318,23 @@ class ModelStats(BaseModel):
     calls: int
     total_tokens: int
     reasoning_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    tokens_saved: int = 0  # compression savings from metadata_extra
     cost: float | None
 
 
 class StatsResponse(BaseModel):
     total_calls: int
     total_tokens: int
+    total_prompt_tokens: int = 0
     total_reasoning_tokens: int = 0
+    total_cache_read_tokens: int = 0
+    total_cache_write_tokens: int = 0
+    total_tokens_saved: int = 0  # compression savings
     total_cost: float | None
+    interval: str = "1d"  # bucket granularity ("5m","1h","1d","1w","1mo")
+    since: datetime | None = None
+    until: datetime | None = None
     by_day: list[DailyStats]
     by_model: list[ModelStats]

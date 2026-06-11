@@ -84,6 +84,8 @@ def ingest_log_entry(
         completion_tokens=payload.usage.completion_tokens,
         total_tokens=payload.usage.total_tokens,
         reasoning_tokens=payload.usage.reasoning_tokens,
+        cache_read_tokens=payload.usage.cache_read_tokens,
+        cache_write_tokens=payload.usage.cache_write_tokens,
         cost_total=cost_total,
         cost_currency=cost_currency,
         cost_source=cost_source,

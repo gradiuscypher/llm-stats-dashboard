@@ -194,6 +194,13 @@ blocks from reasoning-capable models. Both paths are covered:
 - **Usage**: `completion_tokens_details.reasoning_tokens` is captured as
   `reasoning_tokens` in the log entry.
 
+**Cache tracking**: The proxy captures upstream KV-cache metrics from
+`prompt_tokens_details.cached_tokens` (cache reads) and
+`cache_creation_input_tokens` (cache writes) when reported by the upstream
+provider. These are stored as `cache_read_tokens` / `cache_write_tokens` on
+the log entry and surfaced in dashboard stats (cache hit %, per-model cache
+usage).
+
 Reasoning is stored on the assistant message and surfaced in the conversation
 transcript and log detail views as a collapsible "Thinking" block.
 Encrypted/redacted reasoning blocks are shown as labeled placeholders.

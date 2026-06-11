@@ -204,12 +204,27 @@ def map_to_log_entry(
     # ---- Usage ----
     usage = upstream_response.get("usage", {})
     details = usage.get("completion_tokens_details") or {}
+    prompt_details = usage.get("prompt_tokens_details") or {}
     reasoning_tokens = details.get("reasoning_tokens", 0) or 0
+    # Cache reads: OpenRouter normalizes as prompt_tokens_details.cached_tokens.
+    # Some providers report cache_read_input_tokens at the top level.
+    cache_read = (
+        prompt_details.get("cached_tokens", 0)
+        or usage.get("cache_read_input_tokens", 0)
+        or 0
+    )
+    cache_write = (
+        usage.get("cache_creation_input_tokens", 0)
+        or prompt_details.get("cache_creation_tokens", 0)
+        or 0
+    )
     usage_payload = UsagePayload(
         prompt_tokens=usage.get("prompt_tokens", 0),
         completion_tokens=usage.get("completion_tokens", 0),
         total_tokens=usage.get("total_tokens", 0),
         reasoning_tokens=reasoning_tokens,
+        cache_read_tokens=cache_read,
+        cache_write_tokens=cache_write,
     )
 
     # ---- Cost ----
@@ -248,6 +263,7 @@ def map_to_log_entry(
             "upstream_request_id": upstream_response.get("id"),
             "upstream_model": upstream_response.get("model"),
             "compression": ctx.state.get("compression", {}),
+            "usage_details": prompt_details,
         },
     )
 
