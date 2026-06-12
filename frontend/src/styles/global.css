@@ -5,7 +5,7 @@
 @theme {
   /* Typography */
   --font-mono:
-    "Berkeley Mono", ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
+    "Ioskeley Mono", ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
 
   /* Palette — monochrome + one accent (light) */
   --color-bg: #f5f5f0;
